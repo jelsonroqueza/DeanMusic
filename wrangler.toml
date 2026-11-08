@@ -9,5 +9,9 @@ database_name = "deanmusic-db"
 database_id = "77f089ff-6bcd-417e-927a-4fc8e8bd04e0"
 migrations_dir = "cloudflare/migrations"
 
+[[kv_namespaces]]
+binding = "MEDIA"
+id = "d962e53d719940c386c02a2da54b71ba"
+
 [vars]
 APP_ORIGIN = "https://deanmusic.pages.dev"
