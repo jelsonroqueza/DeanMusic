@@ -197,8 +197,6 @@ export default function App() {
     else void startSound(seconds).catch(() => notify('Audio playback is unavailable in this browser.'));
   };
 
-  const progress = active ? Math.min(100, (seconds / Math.max(1, active.duration)) * 100) : 0;
-
   return <div className="app-shell">
     <aside className="sidebar">
       <button className="brand" onClick={() => { setPage('home'); setFilter('All'); }}><span className="brand-icon">♫</span><span>dean<span className="brand-soft">music</span><small>YOUR SOUND. YOUR SPACE.</small></span></button>
