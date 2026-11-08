@@ -87,6 +87,32 @@ async function uploadMedia(file: File, kind: 'audio' | 'image' | 'video', durati
   return result.url;
 }
 
+async function readCanvasVideoInfo(file: File): Promise<{ duration: number; width: number; height: number }> {
+  const objectUrl = URL.createObjectURL(file);
+  return await new Promise((resolve, reject) => {
+    const video = document.createElement('video');
+    video.preload = 'metadata';
+    video.onloadedmetadata = () => {
+      const info = { duration: video.duration, width: video.videoWidth, height: video.videoHeight };
+      URL.revokeObjectURL(objectUrl);
+      if (Number.isFinite(info.duration) && info.duration > 0 && info.width > 0 && info.height > 0) resolve(info);
+      else reject(new Error('Could not read the selected Canvas video metadata.'));
+    };
+    video.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      reject(new Error('The selected Canvas video could not be read.'));
+    };
+    video.src = objectUrl;
+  });
+}
+
+function validateCanvasVideo(info: { duration: number; width: number; height: number }): void {
+  if (info.duration > 15.05) throw new Error('Canvas videos must be 15 seconds or shorter.');
+  if (info.width < 720 || info.height < 1280) throw new Error('Use an HD vertical video with at least 720 × 1280 resolution.');
+  const ratio = info.width / info.height;
+  if (Math.abs(ratio - (9 / 16)) > 0.04) throw new Error('Canvas videos must use a vertical 9:16 aspect ratio.');
+}
+
 async function readMediaDuration(file: File, kind: 'audio' | 'video'): Promise<number> {
   const objectUrl = URL.createObjectURL(file);
   return await new Promise<number>((resolve, reject) => {
@@ -258,8 +284,9 @@ export function AdminCentre({ onExit, onNotice, previewOnly = false }: { onExit:
     try {
       let videoDuration = 0;
       if (videoFile) {
-        videoDuration = await readMediaDuration(videoFile, 'video');
-        if (videoDuration > 15.05) throw new Error('Canvas videos must be 15 seconds or shorter.');
+        const videoInfo = await readCanvasVideoInfo(videoFile);
+        validateCanvasVideo(videoInfo);
+        videoDuration = videoInfo.duration;
       }
       for (let index = 0; index < audioFiles.length; index += 1) {
         const file = audioFiles[index];
@@ -426,9 +453,9 @@ export function AdminCentre({ onExit, onNotice, previewOnly = false }: { onExit:
     try {
       let videoPath: string | null | undefined;
       if (editVideoFile) {
-        const videoDuration = await readMediaDuration(editVideoFile, 'video');
-        if (videoDuration > 15.05) throw new Error('Canvas videos must be 15 seconds or shorter.');
-        videoPath = await uploadMedia(editVideoFile, 'video', videoDuration);
+        const videoInfo = await readCanvasVideoInfo(editVideoFile);
+        validateCanvasVideo(videoInfo);
+        videoPath = await uploadMedia(editVideoFile, 'video', videoInfo.duration);
       } else if (removeExistingVideo) {
         videoPath = null;
       }
