@@ -157,6 +157,9 @@ export default function App() {
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
   const [user, setUser] = useState<User | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [adminBootstrapToken, setAdminBootstrapToken] = useState('');
+  const [adminBootstrapError, setAdminBootstrapError] = useState('');
+  const [adminBootstrapBusy, setAdminBootstrapBusy] = useState(false);
   const [authOpen, setAuthOpen] = useState(false);
   const [authMode, setAuthMode] = useState<'signin' | 'signup'>('signin');
   const [name, setName] = useState('');
@@ -364,6 +367,26 @@ export default function App() {
     }
   };
 
+  const submitAdminBootstrap = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setAdminBootstrapBusy(true);
+    setAdminBootstrapError('');
+    try {
+      const result = await api<{ isAdmin: boolean }>('/api/admin/bootstrap', {
+        method: 'POST',
+        body: JSON.stringify({ token: adminBootstrapToken }),
+      });
+      setIsAdmin(Boolean(result.isAdmin));
+      setAdminBootstrapToken('');
+      notify('Admin access activated for this account.');
+      openPage('admin');
+    } catch (error) {
+      setAdminBootstrapError(error instanceof Error ? error.message : 'Could not activate Admin access.');
+    } finally {
+      setAdminBootstrapBusy(false);
+    }
+  };
+
   const submitAuth = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setBusy(true);
@@ -391,6 +414,8 @@ export default function App() {
       stopSound();
       setUser(null);
       setIsAdmin(false);
+      setAdminBootstrapToken('');
+      setAdminBootstrapError('');
       setLiked([]);
       setPlaylists([]);
       setSelectedPlaylist(null);
@@ -683,11 +708,38 @@ export default function App() {
                 <p className="section-eyebrow">YOUR DEANMUSIC ACCOUNT</p>
                 <h1>Profile</h1>
                 {user ? (
+                  <>
                   <div className="profile-card">
                     <div className="profile-avatar-large">{user.name.slice(0, 1).toUpperCase()}</div>
                     <div><h2>{user.name}</h2><p>{user.email}</p><span>DeanMusic member</span></div>
                     <button className="outline-button" onClick={() => void signOut()}><Icon name="logout" size={17} /> Sign Out</button>
                   </div>
+                  {user.email.trim().toLowerCase() === 'jelsonroqueza@gmail.com' && !isAdmin && (
+                    <form className="admin-bootstrap-panel" onSubmit={submitAdminBootstrap}>
+                      <div>
+                        <p className="section-eyebrow">OWNER ACTIVATION</p>
+                        <h2>Activate Admin Centre</h2>
+                        <p>Enter your one-time private activation code. This code can only activate the first administrator and cannot be reused.</p>
+                      </div>
+                      <label>One-time activation code
+                        <input
+                          type="password"
+                          value={adminBootstrapToken}
+                          onChange={(event) => setAdminBootstrapToken(event.target.value)}
+                          minLength={32}
+                          maxLength={128}
+                          autoComplete="off"
+                          spellCheck={false}
+                          required
+                        />
+                      </label>
+                      {adminBootstrapError && <p className="form-error" role="alert">{adminBootstrapError}</p>}
+                      <button type="submit" className="primary-button" disabled={adminBootstrapBusy || adminBootstrapToken.trim().length < 32}>
+                        {adminBootstrapBusy ? 'Activating…' : 'Activate Admin Access'}
+                      </button>
+                    </form>
+                  )}
+                  </>
                 ) : (
                   <div className="empty-state"><Icon name="user" size={34} /><strong>Sign in to your account</strong><p>Your saved music and playlists will be available here.</p><button className="primary-button" onClick={() => { setAuthMode('signin'); setAuthOpen(true); }}>Sign In</button></div>
                 )}

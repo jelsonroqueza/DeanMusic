@@ -22,3 +22,6 @@ ADMIN_ACCESS_DISABLED = "true"
 
 [env.production.vars]
 APP_ORIGIN = "https://deanmusic.pages.dev"
+ADMIN_BOOTSTRAP_EMAIL = "jelsonroqueza@gmail.com"
+ADMIN_BOOTSTRAP_SHA256 = "46a1eff2e9cd1b934d531466e6e683825672b90bc9ba3607910220a86ccba8c5"
+ADMIN_BOOTSTRAP_EXPIRES_AT = "2026-11-16T00:00:00Z"

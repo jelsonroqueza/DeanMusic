@@ -41,7 +41,7 @@ Never put these values in a `VITE_` variable, GitHub file, frontend code, or cha
 
 ## 4. Administrator provisioning
 
-Admin privileges are granted only to an authenticated account whose user ID is explicitly present in the DeanMusic D1 `admins` table. Do not use an email allowlist while email verification is disabled. The secure first-admin bootstrap flow must be completed before Admin Centre is usable in Production. Preview builds set `ADMIN_ACCESS_DISABLED = "true"` and cannot use Admin Centre endpoints. Keep Preview read-only until it has separate staging D1 and media-storage bindings.
+Admin privileges are granted only to an authenticated account whose user ID is explicitly present in the DeanMusic D1 `admins` table. Do not use an email allowlist while email verification is disabled. The first administrator can be provisioned once using the short-lived activation flow in the account Profile page. The token hash, approved email, and expiry are configured only in Production variables; the plain one-time token is not stored in the repository. Preview builds set `ADMIN_ACCESS_DISABLED = "true"` and cannot use Admin Centre endpoints. Keep Preview read-only until it has separate staging D1 and media-storage bindings.
 
 ## 5. Apply the D1 migration
 

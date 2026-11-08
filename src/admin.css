@@ -78,3 +78,12 @@
 .admin-edit-description{display:flex;flex-direction:column;gap:7px;color:#cbd3cd;font-size:12px;font-weight:600;margin:12px 0}.admin-edit-album .admin-form-row{margin-bottom:4px}
 
 .admin-preview-banner{display:flex;flex-direction:column;gap:5px;margin:0 0 18px;padding:14px 16px;border:1px solid #3b583f;border-radius:12px;background:linear-gradient(120deg,#132319,#151b16);color:#b8c8bc;font-size:12px;line-height:1.5}.admin-preview-banner strong{color:#9cffaa;font-size:13px}.admin-centre.is-preview .admin-form input:disabled,.admin-centre.is-preview .admin-form textarea:disabled,.admin-centre.is-preview .admin-form select:disabled{opacity:.55;cursor:not-allowed}
+
+.admin-bootstrap-panel{width:100%;max-width:760px;margin-top:18px;padding:20px 22px;display:flex;flex-direction:column;gap:15px;background:linear-gradient(145deg,#151a17,#101311);border:1px solid #2b4a31;border-radius:16px}
+.admin-bootstrap-panel h2{margin:4px 0 7px;color:#f3fff5;font-size:19px}
+.admin-bootstrap-panel p:not(.section-eyebrow){margin:0;color:#9eaaa2;font-size:12px;line-height:1.6}
+.admin-bootstrap-panel label{display:flex;flex-direction:column;gap:7px;color:#d0d9d2;font-size:12px;font-weight:600}
+.admin-bootstrap-panel input{width:100%;border:1px solid #354139;border-radius:9px;background:#0b0f0c;color:#f6fff7;padding:12px;font:inherit;font-size:13px;letter-spacing:1px}
+.admin-bootstrap-panel input:focus{outline:none;border-color:#00c819;box-shadow:0 0 0 3px #00e51a18}
+.admin-bootstrap-panel .primary-button{align-self:flex-start}
+@media(max-width:700px){.admin-bootstrap-panel{padding:16px}.admin-bootstrap-panel .primary-button{width:100%}}
