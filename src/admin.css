@@ -104,3 +104,5 @@
 .admin-check-row{display:flex!important;flex-direction:row!important;align-items:center;gap:9px!important;margin:8px 0;color:#bdc9bf!important}
 .admin-check-row input{width:16px;height:16px;accent-color:#00e51a}
 @media(max-width:700px){.admin-storage-heading{align-items:flex-start;flex-direction:column}.admin-selected-files{max-height:180px;overflow:auto}}
+
+.admin-storage-warning{margin:10px 0!important;padding:10px 12px;border:1px solid rgba(255,185,74,.35);border-radius:9px;background:rgba(255,172,55,.08);color:#ffd28a!important;font-size:11px!important}
