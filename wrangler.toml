@@ -15,3 +15,4 @@ id = "d962e53d719940c386c02a2da54b71ba"
 
 [vars]
 APP_ORIGIN = "https://deanmusic.pages.dev"
+ADMIN_EMAILS = "jelsonroqueza@gmail.com"
