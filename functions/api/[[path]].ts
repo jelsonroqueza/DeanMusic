@@ -10,8 +10,10 @@ interface Env {
   MEDIA: KVNamespace;
   BETTER_AUTH_SECRET: string;
   APP_ORIGIN: string;
-  ADMIN_EMAILS?: string;
   ADMIN_ACCESS_DISABLED?: string;
+  ADMIN_BOOTSTRAP_EMAIL?: string;
+  ADMIN_BOOTSTRAP_SHA256?: string;
+  ADMIN_BOOTSTRAP_EXPIRES_AT?: string;
 }
 interface Context {
   request: Request;
@@ -62,6 +64,20 @@ async function getUser(request: Request, env: Env): Promise<UserRecord | null> {
     name: session.user.name,
     email: session.user.email
   };
+}
+
+function constantTimeEqual(left: string, right: string): boolean {
+  if (left.length !== right.length) return false;
+  let difference = 0;
+  for (let index = 0; index < left.length; index += 1) {
+    difference |= left.charCodeAt(index) ^ right.charCodeAt(index);
+  }
+  return difference === 0;
+}
+
+async function sha256Hex(value: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value));
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
 async function isAdmin(user: UserRecord, env: Env): Promise<boolean> {
@@ -350,6 +366,46 @@ export const onRequest = async ({ request, env }: Context): Promise<Response> =>
           .bind(crypto.randomUUID(), user.id, trackId).run();
       }
       return reply({ recorded: true });
+    }
+
+    if (path === '/api/admin/bootstrap' && request.method === 'POST') {
+      const user = await getUser(request, env);
+      if (!user) return reply({ error: 'Sign in to DeanMusic first.' }, 401);
+      if (env.ADMIN_ACCESS_DISABLED === 'true') return reply({ error: 'Admin activation is disabled in Preview.' }, 403);
+
+      const approvedEmail = (env.ADMIN_BOOTSTRAP_EMAIL ?? '').trim().toLowerCase();
+      const expectedHash = (env.ADMIN_BOOTSTRAP_SHA256 ?? '').trim().toLowerCase();
+      const expiresAt = Date.parse(env.ADMIN_BOOTSTRAP_EXPIRES_AT ?? '');
+      if (
+        !approvedEmail ||
+        !/^[a-f0-9]{64}$/.test(expectedHash) ||
+        !Number.isFinite(expiresAt) ||
+        Date.now() > expiresAt ||
+        user.email.trim().toLowerCase() !== approvedEmail
+      ) {
+        return reply({ error: 'Admin activation is unavailable for this account.' }, 403);
+      }
+
+      const body = await bodyJson<{ token?: unknown }>(request);
+      const token = typeof body?.token === 'string' ? body.token.trim() : '';
+      if (token.length < 32 || token.length > 128) {
+        return reply({ error: 'The one-time activation code is invalid or expired.' }, 403);
+      }
+      const actualHash = await sha256Hex(token);
+      if (!constantTimeEqual(actualHash, expectedHash)) {
+        return reply({ error: 'The one-time activation code is invalid or expired.' }, 403);
+      }
+
+      const existing = await env.DB.prepare('SELECT user_id FROM admins LIMIT 1').first();
+      if (existing) return reply({ error: 'The first administrator has already been activated.' }, 409);
+
+      const inserted = await env.DB.prepare(
+        'INSERT INTO admins (user_id) SELECT ? WHERE NOT EXISTS (SELECT 1 FROM admins)'
+      ).bind(user.id).run();
+      if (!inserted.meta.changes) {
+        return reply({ error: 'The first administrator has already been activated.' }, 409);
+      }
+      return reply({ isAdmin: true, activated: true }, 201);
     }
 
     if (path === '/api/admin/status' && request.method === 'GET') {
