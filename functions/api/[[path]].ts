@@ -66,11 +66,6 @@ async function getUser(request: Request, env: Env): Promise<UserRecord | null> {
 
 async function isAdmin(user: UserRecord, env: Env): Promise<boolean> {
   if (env.ADMIN_ACCESS_DISABLED === 'true') return false;
-  const allowlist = (env.ADMIN_EMAILS ?? '')
-    .split(',')
-    .map((email) => email.trim().toLowerCase())
-    .filter(Boolean);
-  if (allowlist.includes(user.email.trim().toLowerCase())) return true;
   const record = await env.DB.prepare('SELECT user_id FROM admins WHERE user_id = ?')
     .bind(user.id).first();
   return Boolean(record);
