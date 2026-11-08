@@ -714,6 +714,7 @@ export default function App() {
       )}
 
       <audio
+        hidden
         ref={audioRef}
         preload="metadata"
         onTimeUpdate={() => { if (audioRef.current && !audioRef.current.paused) setSeconds(audioRef.current.currentTime); }}
