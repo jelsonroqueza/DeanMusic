@@ -29,6 +29,8 @@ The first beta is a foundation, not a full Spotify replacement. Track uploads, a
 
 ## Admin Centre preview
 
+The first valid owner activation now performs an idempotent schema recovery for the Admin Centre tables and album columns if the production D1 database missed migration `0002`. This recovery runs only after the signed-in approved owner account and one-time activation token have both been validated. The CI workflow also validates every D1 migration in order, including the Admin Centre schema.
+
 The Admin Centre is available in Production only to authenticated user IDs explicitly provisioned in the DeanMusic D1 `admins` table. Preview deployments deliberately disable admin authorization. First-admin provisioning uses a short-lived, single-use activation token bound to the approved email; an email allowlist alone is not used because email verification is disabled. It supports album and artist metadata, cover art uploads, album publishing, track uploads, track detail editing, track deletion, and browser playback of uploaded audio. The current free-tier upload limits are 20 MB per audio file and 2 MB per cover image. Uploaded media is served from the existing Cloudflare Workers KV binding; keep original master files in private Google Drive as a separate archive until an automatic Drive backup integration is implemented.
 
 For a visual-only Admin Centre walkthrough, open the Cloudflare branch Preview URL with `?admin-preview=1`. This displays sample albums/tracks; uploads, publishing, editing, and deleting are disabled, and no catalog API is called by the demo panel.
