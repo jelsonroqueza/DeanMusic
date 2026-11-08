@@ -29,7 +29,7 @@ The first beta is a foundation, not a full Spotify replacement. Track uploads, a
 
 ## Admin Centre preview
 
-The Admin Centre is available to the server-authorized account listed by `ADMIN_EMAILS` in `wrangler.toml`. It supports album and artist metadata, cover art uploads, album publishing, track uploads, track detail editing, track deletion, and browser playback of uploaded audio. The current free-tier upload limits are 20 MB per audio file and 2 MB per cover image. Uploaded media is served from the existing Cloudflare Workers KV binding; keep original master files in private Google Drive as a separate archive until an automatic Drive backup integration is implemented.
+The Admin Centre is available in Production to the server-authorized account listed by `ADMIN_EMAILS` in `wrangler.toml`. Preview deployments deliberately disable admin authorization. It supports album and artist metadata, cover art uploads, album publishing, track uploads, track detail editing, track deletion, and browser playback of uploaded audio. The current free-tier upload limits are 20 MB per audio file and 2 MB per cover image. Uploaded media is served from the existing Cloudflare Workers KV binding; keep original master files in private Google Drive as a separate archive until an automatic Drive backup integration is implemented.
 
 ## Strict cost and safety rules
 
