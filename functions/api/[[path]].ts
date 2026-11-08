@@ -11,6 +11,7 @@ interface Env {
   BETTER_AUTH_SECRET: string;
   APP_ORIGIN: string;
   ADMIN_EMAILS?: string;
+  ADMIN_ACCESS_DISABLED?: string;
 }
 interface Context {
   request: Request;
@@ -64,6 +65,7 @@ async function getUser(request: Request, env: Env): Promise<UserRecord | null> {
 }
 
 async function isAdmin(user: UserRecord, env: Env): Promise<boolean> {
+  if (env.ADMIN_ACCESS_DISABLED === 'true') return false;
   const allowlist = (env.ADMIN_EMAILS ?? '')
     .split(',')
     .map((email) => email.trim().toLowerCase())
