@@ -42,7 +42,7 @@ Never put these values in a `VITE_` variable, GitHub file, frontend code, or cha
 
 ## 4. Configure the first administrator
 
-`ADMIN_EMAILS` is defined as a plain server-side variable in `wrangler.toml` for both Preview and Production. It contains the exact approved administrator email address(es), separated by commas. This is not a `VITE_` frontend variable or a secret. The existing `admins` D1 table remains supported for additional database-managed administrators.
+`ADMIN_EMAILS` is defined as a plain server-side variable under `[env.production.vars]` in `wrangler.toml`. It contains the exact approved administrator email address(es), separated by commas. This is not a `VITE_` frontend variable or a secret. Preview builds set `ADMIN_ACCESS_DISABLED = "true"` and cannot use Admin Centre writes. Keep Preview read-only until it has separate staging D1 and media-storage bindings. The existing `admins` D1 table remains supported for additional database-managed administrators in Production.
 
 ## 5. Apply the D1 migration
 
