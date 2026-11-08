@@ -81,6 +81,14 @@ export function AdminCentre({ onExit, onNotice }: { onExit: () => void; onNotice
   const [releaseDate, setReleaseDate] = useState('');
   const [coverFile, setCoverFile] = useState<File | null>(null);
 
+  const [editingAlbum, setEditingAlbum] = useState<Album | null>(null);
+  const [editAlbumTitle, setEditAlbumTitle] = useState('');
+  const [editArtistName, setEditArtistName] = useState('');
+  const [editAlbumGenre, setEditAlbumGenre] = useState('');
+  const [editAlbumDescription, setEditAlbumDescription] = useState('');
+  const [editReleaseDate, setEditReleaseDate] = useState('');
+  const [editCoverFile, setEditCoverFile] = useState<File | null>(null);
+
   const [selectedAlbum, setSelectedAlbum] = useState('');
   const [trackTitle, setTrackTitle] = useState('');
   const [trackGenre, setTrackGenre] = useState('');
@@ -201,6 +209,44 @@ export function AdminCentre({ onExit, onNotice }: { onExit: () => void; onNotice
       onNotice('Track uploaded. It is now saved in the selected album.');
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Could not upload the track.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const beginEditAlbum = (album: Album) => {
+    setEditingAlbum(album);
+    setEditAlbumTitle(album.title);
+    setEditArtistName(album.artist_name);
+    setEditAlbumGenre(album.genre ?? '');
+    setEditAlbumDescription(album.description ?? '');
+    setEditReleaseDate(album.release_date ?? '');
+    setEditCoverFile(null);
+  };
+
+  const saveAlbumEdit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!editingAlbum) return;
+    setBusy(true);
+    setError('');
+    try {
+      const coverUrl = editCoverFile ? await uploadMedia(editCoverFile, 'image') : (editingAlbum.cover_url ?? '');
+      await adminApi('/api/admin/albums/' + encodeURIComponent(editingAlbum.id), {
+        method: 'PATCH',
+        body: JSON.stringify({
+          title: editAlbumTitle.trim(),
+          artistName: editArtistName.trim(),
+          genre: editAlbumGenre.trim(),
+          description: editAlbumDescription.trim(),
+          releaseDate: editReleaseDate,
+          coverUrl,
+        }),
+      });
+      setEditingAlbum(null);
+      await loadData();
+      onNotice('Album details updated.');
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Could not update the album.');
     } finally {
       setBusy(false);
     }
@@ -336,12 +382,27 @@ export function AdminCentre({ onExit, onNotice }: { onExit: () => void; onNotice
           </article>
 
           <div className="admin-list-panel">
+            {editingAlbum && (
+              <form className="admin-edit-track admin-edit-album" onSubmit={saveAlbumEdit}>
+                <div><strong>Edit album details</strong><button type="button" className="admin-text-button" onClick={() => setEditingAlbum(null)}>Cancel</button></div>
+                <div className="admin-form-row">
+                  <label>Album title<input value={editAlbumTitle} onChange={(event) => setEditAlbumTitle(event.target.value)} maxLength={120} required /></label>
+                  <label>Artist name<input value={editArtistName} onChange={(event) => setEditArtistName(event.target.value)} maxLength={120} required /></label>
+                  <label>Genre<input value={editAlbumGenre} onChange={(event) => setEditAlbumGenre(event.target.value)} maxLength={60} /></label>
+                  <label>Release date<input type="date" value={editReleaseDate} onChange={(event) => setEditReleaseDate(event.target.value)} /></label>
+                </div>
+                <label className="admin-edit-description">Description<textarea value={editAlbumDescription} onChange={(event) => setEditAlbumDescription(event.target.value)} maxLength={1000} rows={2} /></label>
+                <label className="admin-edit-description">Replace cover artwork <span className="admin-field-hint">JPG, PNG, or WebP · max 2 MB</span><input type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => setEditCoverFile(event.target.files?.[0] ?? null)} /></label>
+                <button type="submit" className="admin-primary-button" disabled={busy}>Save album details</button>
+              </form>
+            )}
             <div className="admin-panel-heading"><div><h2>Your albums</h2><p>{albums.length} album{albums.length === 1 ? '' : 's'} in your catalog.</p></div></div>
             {albums.length ? albums.map((album) => (
               <article className="admin-album-row" key={album.id}>
                 <div className="admin-album-cover">{album.cover_url ? <img src={album.cover_url} alt="" /> : <span>♫</span>}</div>
                 <div className="admin-album-copy"><strong>{album.title}</strong><small>{album.artist_name} · {album.track_count} tracks · {album.genre || 'Uncategorized'}</small></div>
                 <span className={album.is_published === 1 ? 'admin-pill published' : 'admin-pill draft'}>{album.is_published === 1 ? 'Published' : 'Draft'}</span>
+                <button type="button" className="admin-text-button" disabled={busy} onClick={() => beginEditAlbum(album)}>Edit</button>
                 <button type="button" className="admin-secondary-button" disabled={busy} onClick={() => void toggleAlbumPublish(album)}>{album.is_published === 1 ? 'Unpublish' : 'Publish'}</button>
               </article>
             )) : <div className="admin-empty">No albums yet. Create your first album using the form.</div>}
