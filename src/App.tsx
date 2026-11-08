@@ -672,6 +672,7 @@ export default function App() {
           <Icon name="volume" size={20} />
           <input aria-label="Volume" type="range" min="0" max="1" step="0.01" value={volume} onChange={(event) => setVolume(Number(event.target.value))} />
           <button className="queue-button" aria-label="Open queue" onClick={() => notify(active ? 'Queue is not available yet.' : 'Choose a track to start listening.')}><Icon name="queue" size={21} /></button>
+          <button className="mobile-play-button" aria-label={playing ? 'Pause' : 'Play'} onClick={togglePlay}><Icon name={playing ? 'pause' : 'play'} size={19} /></button>
         </div>
       </footer>
 
