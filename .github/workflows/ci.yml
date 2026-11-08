@@ -60,7 +60,7 @@ jobs:
           expected = {
               "user", "session", "account", "verification", "artists", "albums",
               "tracks", "playlists", "playlist_tracks", "liked_tracks", "follows",
-              "saved_albums", "recently_played", "admins"
+              "saved_albums", "recently_played", "admins", "media_assets"
           }
           actual = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
           missing = expected - actual
@@ -71,7 +71,17 @@ jobs:
           missing_columns = required_album_columns - album_columns
           assert not missing_columns, f"Missing Admin Centre album columns: {sorted(missing_columns)}"
 
+          media_columns = {row[1] for row in db.execute("PRAGMA table_info(media_assets)")}
+          required_media_columns = {"id", "provider", "object_key", "media_kind", "file_name", "content_type", "size_bytes", "created_by", "status"}
+          missing_media_columns = required_media_columns - media_columns
+          assert not missing_media_columns, f"Missing media inventory columns: {sorted(missing_media_columns)}"
+
+          api_source = Path("functions/api/[[path]].ts").read_text(encoding="utf-8")
+          assert "ALTER TABLE tracks ADD COLUMN video_path TEXT" in api_source, "Idempotent Canvas video_path schema recovery is missing."
+          assert "R2_STORAGE_LIMIT_BYTES = 100_000_000_000" in api_source, "The DeanMusic 100 GB storage ceiling is missing."
+          assert "R2_STORAGE_WARNING_BYTES = 80_000_000_000" in api_source, "The DeanMusic 80 GB storage warning is missing."
+
           track = db.execute("SELECT title, audio_path FROM tracks WHERE id='demo-midnight'").fetchone()
           assert track == ("Midnight Reverie", "browser-synth"), track
-          print("All D1 migrations passed SQLite validation; Admin Centre schema and demo track are present.")
+          print("All D1 migrations passed SQLite validation; Admin, media inventory, Canvas, and demo catalog checks passed.")
           PY
