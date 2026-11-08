@@ -389,7 +389,7 @@ export function AdminCentre({ onExit, onNotice, previewOnly = false }: { onExit:
 
   const removeTrack = async (track: Track) => {
     if (previewOnly) return;
-    if (!window.confirm('Delete "' + track.title + '" and its uploaded audio file? This cannot be undone.')) return;
+    if (!window.confirm('Delete "' + track.title + '" and its uploaded audio plus Canvas video files? This cannot be undone.')) return;
     setBusy(true);
     setError('');
     try {
@@ -495,8 +495,13 @@ export function AdminCentre({ onExit, onNotice, previewOnly = false }: { onExit:
             </article>
           </div>
           <div className="admin-storage-note">
-            <strong>Music file storage</strong>
-            <p>Uploaded audio is delivered from DeanMusic's Cloudflare media storage (up to 20 MB per audio file). Keep your original master files in your private Google Drive archive. Automatic Google Drive backup is not connected yet.</p>
+            <div className="admin-storage-heading">
+              <div><strong>Music & video storage · {storageUsage?.provider ?? 'Checking…'}</strong><small>{storageUsage?.r2Connected ? 'R2 is connected. New audio, cover, and Canvas video uploads use your R2 bucket.' : 'R2 is not connected yet. The current free KV storage remains active until the R2 bucket is provisioned.'}</small></div>
+              <span className={storageUsage?.r2Connected ? 'admin-pill published' : 'admin-pill draft'}>{storageUsage?.r2Connected ? 'R2 connected' : 'KV active'}</span>
+            </div>
+            <div className="admin-storage-bar"><span style={{ width: (storageUsage?.percentUsed ?? 0) + '%' }} /></div>
+            <div className="admin-storage-summary"><span>{formatBytes(storageUsage?.usedBytes ?? 0)} used of {formatBytes(storageUsage?.limitBytes ?? 0)}</span><strong>{(storageUsage?.percentUsed ?? 0).toFixed(1)}%</strong></div>
+            <p>{storageUsage?.r2Connected ? 'Warning at 80 GB. New uploads are blocked at the 100 GB app storage ceiling.' : 'R2 target: 100 GB app ceiling, 80 GB warning. Current KV fallback is limited to its 1 GB app ceiling. No automatic billing or upgrade is enabled.'}</p>
           </div>
           <div className="admin-rights-note">Only upload music and artwork you own or have permission to distribute and stream.</div>
         </>
@@ -552,15 +557,18 @@ export function AdminCentre({ onExit, onNotice, previewOnly = false }: { onExit:
             {!albums.length ? <div className="admin-empty">Create an album before uploading tracks.</div> : (
               <form onSubmit={submitTrack} className="admin-form">
                 <label>Album<select disabled={previewOnly || busy} value={selectedAlbum} onChange={(event) => setSelectedAlbum(event.target.value)} required>{albums.map((album) => <option key={album.id} value={album.id}>{album.title} — {album.artist_name}</option>)}</select></label>
-                <label>Track title<input disabled={previewOnly || busy} value={trackTitle} onChange={(event) => setTrackTitle(event.target.value)} maxLength={120} required placeholder="Enter track title" /></label>
+                <label>Track title <span className="admin-field-hint">Optional for one file. Multiple uploads use each filename as its track title.</span><input disabled={previewOnly || busy || audioFiles.length > 1} value={trackTitle} onChange={(event) => setTrackTitle(event.target.value)} maxLength={120} placeholder="Optional custom title for one track" /></label>
                 <div className="admin-form-row">
-                  <label>Track number<input disabled={previewOnly || busy} type="number" min="1" step="1" value={trackNumber} onChange={(event) => setTrackNumber(event.target.value)} required /></label>
+                  <label>Starting track number<input disabled={previewOnly || busy} type="number" min="1" step="1" value={trackNumber} onChange={(event) => setTrackNumber(event.target.value)} required /></label>
                   <label>Genre<input disabled={previewOnly || busy} value={trackGenre} onChange={(event) => setTrackGenre(event.target.value)} maxLength={60} placeholder="Leave blank to use album genre" /></label>
                 </div>
-                <label>Audio file <span className="admin-field-hint">MP3, M4A, AAC, OGG, WAV, or WebM · max 20 MB</span><input disabled={previewOnly || busy} id="admin-audio-file" type="file" accept="audio/mpeg,audio/mp4,audio/aac,audio/ogg,audio/wav,audio/x-wav,audio/webm,.mp3,.m4a,.aac,.ogg,.wav,.webm" onChange={onAudioSelected} required /></label>
-                {audioFile && <p className="admin-file-name">Selected: {audioFile.name}</p>}
-                <label>Duration in seconds <span className="admin-field-hint">Detected automatically when supported; you can adjust it.</span><input disabled={previewOnly || busy} type="number" min="0" max="86400" value={trackDuration} onChange={(event) => setTrackDuration(event.target.value)} /></label>
-                <button type="submit" className="admin-primary-button" disabled={previewOnly || busy || !albums.length}>{busy ? 'Uploading…' : 'Upload track'}</button>
+                <label>Audio files <span className="admin-field-hint">MP3, M4A, AAC, OGG, WAV, or WebM · max 20 MB each · select multiple songs</span><input disabled={previewOnly || busy} id="admin-audio-file" type="file" multiple accept="audio/mpeg,audio/mp4,audio/aac,audio/ogg,audio/wav,audio/x-wav,audio/webm,.mp3,.m4a,.aac,.ogg,.wav,.webm" onChange={onAudioSelected} required /></label>
+                {audioFiles.length > 0 && <div className="admin-selected-files"><strong>{audioFiles.length} audio file{audioFiles.length === 1 ? '' : 's'} selected</strong>{audioFiles.slice(0, 8).map((file) => <small key={file.name + file.size}>{file.name} · {formatBytes(file.size)}</small>)}{audioFiles.length > 8 && <small>+ {audioFiles.length - 8} more files</small>}</div>}
+                <label>Canvas music video <span className="admin-field-hint">Optional · MP4 or WebM · maximum 15 seconds and 25 MB · attach during upload for one song only</span><input disabled={previewOnly || busy || audioFiles.length > 1} id="admin-video-file" type="file" accept="video/mp4,video/webm,.mp4,.webm" onChange={(event) => setVideoFile(event.target.files?.[0] ?? null)} /></label>
+                {videoFile && <p className="admin-file-name">Selected Canvas: {videoFile.name}</p>}
+                <label>Duration in seconds <span className="admin-field-hint">Detected automatically for each song; this field is used for a single file only.</span><input disabled={previewOnly || busy || audioFiles.length !== 1} type="number" min="0" max="86400" value={trackDuration} onChange={(event) => setTrackDuration(event.target.value)} /></label>
+                {uploadProgress && <p className="admin-upload-progress" role="status">{uploadProgress}</p>}
+                <button type="submit" className="admin-primary-button" disabled={previewOnly || busy || !albums.length || !audioFiles.length}>{busy ? 'Uploading…' : 'Upload ' + (audioFiles.length > 1 ? audioFiles.length + ' tracks' : 'track')}</button>
               </form>
             )}
           </article>
@@ -576,6 +584,10 @@ export function AdminCentre({ onExit, onNotice, previewOnly = false }: { onExit:
                   <label>Track number<input disabled={previewOnly || busy} type="number" min="1" step="1" value={editNumber} onChange={(event) => setEditNumber(event.target.value)} required /></label>
                   <label>Duration (seconds)<input disabled={previewOnly || busy} type="number" min="0" max="86400" value={editDuration} onChange={(event) => setEditDuration(event.target.value)} required /></label>
                 </div>
+                <label>Replace Canvas video <span className="admin-field-hint">Optional · MP4 or WebM · maximum 15 seconds and 25 MB</span><input disabled={previewOnly || busy} type="file" accept="video/mp4,video/webm,.mp4,.webm" onChange={(event) => setEditVideoFile(event.target.files?.[0] ?? null)} /></label>
+                {track.video_path && <p className="admin-file-name">A Canvas video is currently attached to this track.</p>}
+                {editVideoFile && <p className="admin-file-name">New Canvas: {editVideoFile.name}</p>}
+                {track.video_path && <label className="admin-check-row"><input type="checkbox" disabled={previewOnly || busy || Boolean(editVideoFile)} checked={removeExistingVideo} onChange={(event) => setRemoveExistingVideo(event.target.checked)} /> Remove current Canvas video when saving</label>}
                 <button type="submit" className="admin-primary-button" disabled={previewOnly || busy}>Save track details</button>
               </form>
             )}
@@ -585,7 +597,7 @@ export function AdminCentre({ onExit, onNotice, previewOnly = false }: { onExit:
                   <thead><tr><th>Track</th><th>Album</th><th>Duration</th><th>Plays</th><th>Status</th><th>Actions</th></tr></thead>
                   <tbody>{visibleTracks.map((track) => (
                     <tr key={track.id}>
-                      <td><strong>{track.title}</strong><small>{track.artist_name}</small></td>
+                      <td><strong>{track.title}</strong><small>{track.artist_name}{track.video_path ? ' · Canvas video attached' : ''}</small></td>
                       <td>{track.album_title || 'Single'}</td>
                       <td>{durationLabel(track.duration_seconds)}</td>
                       <td>{Number(track.plays_count || 0).toLocaleString()}</td>
