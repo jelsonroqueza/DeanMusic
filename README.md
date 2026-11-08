@@ -61,11 +61,11 @@ For a visual-only Admin Centre walkthrough, open the Cloudflare branch Preview U
 4. Remain on Cloudflare Free. Do not select Workers Paid or activate R2.
 5. Create a new, separate D1 database named `deanmusic-db`. Do not use a GENMERCH database.
 6. Replace the placeholder `database_id` in `wrangler.toml` with this new DeanMusic D1 database ID.
-7. Apply the single migration `cloudflare/migrations/0001_init.sql` to that D1 database.
+7. Apply all pending migrations in order with `npx wrangler d1 migrations apply deanmusic-db --remote`. This applies the base schema (`0001_init.sql`) and the Admin Centre schema (`0002_public_albums_admin.sql`).
 8. In Pages > Settings > Variables and Secrets, set:
    - encrypted secret `BETTER_AUTH_SECRET` (generate a random secret of at least 32 characters)
    - plain variable `APP_ORIGIN` (the exact deployed `https://<project>.pages.dev` origin)
-   - optional plain variable `ADMIN_EMAILS` (comma-separated admin email allowlist)
+   - Production bootstrap settings (`ADMIN_BOOTSTRAP_EMAIL`, `ADMIN_BOOTSTRAP_SHA256`, `ADMIN_BOOTSTRAP_EXPIRES_AT`) are defined in `wrangler.toml`; email-only admin allowlists are not used.
 9. Redeploy. Test `/api/health`, registration, login, logout, liking a track, and playlist creation.
 
 ## D1 setup commands
