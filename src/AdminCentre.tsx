@@ -189,6 +189,7 @@ export function AdminCentre({ onExit, onNotice, previewOnly = false }: { onExit:
     if (previewOnly) {
       setAlbums(previewAlbums);
       setTracks(previewTracks);
+      setStorageUsage({ provider: 'Preview only', r2Connected: false, usedBytes: 0, limitBytes: 0, warningBytes: 0, percentUsed: 0, canUpload: false });
       setSelectedAlbum((current) => current || previewAlbums[0].id);
       setLoading(false);
       return;
@@ -525,15 +526,16 @@ export function AdminCentre({ onExit, onNotice, previewOnly = false }: { onExit:
               <button type="button" className="admin-action-card" onClick={() => setTab('tracks')}><span className="admin-action-symbol">♫</span><span><strong>Upload a track</strong><small>Add audio to one of your albums.</small></span></button>
             </article>
           </div>
-          <div className="admin-storage-note">
+          {!previewOnly && <div className="admin-storage-note">
             <div className="admin-storage-heading">
               <div><strong>Music & video storage · {storageUsage?.provider ?? 'Checking…'}</strong><small>{storageUsage?.r2Connected ? 'R2 is connected. New audio, cover, and Canvas video uploads use your R2 bucket.' : 'R2 is not connected yet. The current free KV storage remains active until the R2 bucket is provisioned.'}</small></div>
               <span className={storageUsage?.r2Connected ? 'admin-pill published' : 'admin-pill draft'}>{storageUsage?.r2Connected ? 'R2 connected' : 'KV active'}</span>
             </div>
             <div className="admin-storage-bar"><span style={{ width: (storageUsage?.percentUsed ?? 0) + '%' }} /></div>
             <div className="admin-storage-summary"><span>{formatBytes(storageUsage?.usedBytes ?? 0)} used of {formatBytes(storageUsage?.limitBytes ?? 0)}</span><strong>{(storageUsage?.percentUsed ?? 0).toFixed(1)}%</strong></div>
+            {storageUsage && storageUsage.usedBytes >= storageUsage.warningBytes && <p className="admin-storage-warning" role="status">Storage warning: {(storageUsage.warningBytes / (1024 * 1024 * 1024)).toFixed(1)} GB warning threshold reached. New uploads will stop at the configured limit.</p>}
             <p>{storageUsage?.r2Connected ? 'Warning at 80 GB. New uploads are blocked at the 100 GB app storage ceiling.' : 'R2 target: 100 GB app ceiling, 80 GB warning. Current KV fallback is limited to its 1 GB app ceiling. No automatic billing or upgrade is enabled.'}</p>
-          </div>
+          </div>}
           <div className="admin-rights-note">Only upload music and artwork you own or have permission to distribute and stream.</div>
         </>
       ) : tab === 'albums' ? (
