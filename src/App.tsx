@@ -194,7 +194,7 @@ export default function App() {
     setPlaying(false);
   };
 
-  const startSound = async (from = seconds) => {
+  const startSound = async (from = seconds, duration = active?.duration ?? 24) => {
     stopSound();
     const Context = window.AudioContext;
     const context = audioContext.current ?? new Context();
@@ -221,7 +221,7 @@ export default function App() {
     ticker.current = window.setInterval(() => {
       setSeconds((current) => {
         const next = current + 0.2;
-        if (next >= (active?.duration ?? 24)) {
+        if (next >= duration) {
           if (repeat) return 0;
           stopSound();
           return 0;
@@ -311,7 +311,7 @@ export default function App() {
       return next;
     });
     void api('/api/plays/' + encodeURIComponent(track.id), { method: 'POST', body: '{}' }).catch(() => undefined);
-    void startSound(0).catch(() => notify('Tap play again to enable audio.'));
+    void startSound(0, track.duration).catch(() => notify('Tap play again to enable audio.'));
   };
 
   const toggleLike = async (id: string) => {
@@ -407,13 +407,29 @@ export default function App() {
       return;
     }
     if (playing) stopSound();
-    else void startSound(seconds).catch(() => notify('Audio playback is unavailable in this browser.'));
+    else void startSound(seconds, active.duration).catch(() => notify('Audio playback is unavailable in this browser.'));
+  };
+
+  const playAdjacent = (direction: -1 | 1) => {
+    if (!tracks.length) return;
+    const currentIndex = active ? tracks.findIndex((track) => track.id === active.id) : -1;
+    let nextIndex: number;
+    if (shuffle && tracks.length > 1) {
+      do {
+        nextIndex = Math.floor(Math.random() * tracks.length);
+      } while (nextIndex === currentIndex);
+    } else if (direction > 0) {
+      nextIndex = currentIndex < 0 ? 0 : (currentIndex + 1) % tracks.length;
+    } else {
+      nextIndex = currentIndex <= 0 ? tracks.length - 1 : currentIndex - 1;
+    }
+    chooseTrack(tracks[nextIndex]);
   };
 
   const seek = (value: number) => {
     const next = Math.max(0, Math.min(active?.duration ?? 24, value));
     setSeconds(next);
-    if (playing) void startSound(next);
+    if (playing) void startSound(next, active?.duration ?? 24);
   };
 
   const handleProfileAction = () => {
@@ -657,9 +673,9 @@ export default function App() {
         <div className="player-center">
           <div className="player-controls">
             <button className={shuffle ? 'control-button toggled' : 'control-button'} aria-label="Shuffle" onClick={() => setShuffle((value) => !value)}><Icon name="shuffle" size={19} /></button>
-            <button className="control-button" aria-label="Restart track" onClick={() => seek(0)}><Icon name="previous" size={19} /></button>
+            <button className="control-button" aria-label="Previous track" onClick={() => playAdjacent(-1)}><Icon name="previous" size={19} /></button>
             <button className="main-play-button" aria-label={playing ? 'Pause' : 'Play'} onClick={togglePlay}><Icon name={playing ? 'pause' : 'play'} size={20} /></button>
-            <button className="control-button" aria-label="Skip ahead" onClick={() => seek(seconds + 5)}><Icon name="next" size={19} /></button>
+            <button className="control-button" aria-label="Next track" onClick={() => playAdjacent(1)}><Icon name="next" size={19} /></button>
             <button className={repeat ? 'control-button toggled' : 'control-button'} aria-label="Repeat" onClick={() => setRepeat((value) => !value)}><Icon name="repeat" size={19} /></button>
           </div>
           <div className="progress-row">
