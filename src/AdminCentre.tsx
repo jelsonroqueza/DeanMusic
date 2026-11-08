@@ -22,6 +22,7 @@ type Track = {
   track_number: number | null;
   genre: string | null;
   audio_path: string | null;
+  video_path: string | null;
   is_published: number;
   plays_count: number;
   artist_name: string;
@@ -77,12 +78,39 @@ function durationLabel(seconds: number): string {
   return Math.floor(value / 60) + ':' + String(value % 60).padStart(2, '0');
 }
 
-async function uploadMedia(file: File, kind: 'audio' | 'image'): Promise<string> {
+async function uploadMedia(file: File, kind: 'audio' | 'image' | 'video', durationSeconds?: number): Promise<string> {
   const form = new FormData();
   form.set('file', file);
   form.set('kind', kind);
+  if (kind === 'video' && durationSeconds !== undefined) form.set('durationSeconds', String(durationSeconds));
   const result = await adminApi<{ url: string }>('/api/admin/media', { method: 'POST', body: form });
   return result.url;
+}
+
+async function readMediaDuration(file: File, kind: 'audio' | 'video'): Promise<number> {
+  const objectUrl = URL.createObjectURL(file);
+  return await new Promise<number>((resolve, reject) => {
+    const element = kind === 'audio' ? new Audio() : document.createElement('video');
+    element.preload = 'metadata';
+    element.onloadedmetadata = () => {
+      const duration = element.duration;
+      URL.revokeObjectURL(objectUrl);
+      if (Number.isFinite(duration) && duration > 0) resolve(duration);
+      else reject(new Error('Could not read the selected media duration.'));
+    };
+    element.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      reject(new Error('The selected media file could not be read.'));
+    };
+    element.src = objectUrl;
+  });
+}
+
+function formatBytes(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) return '0 B';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const index = Math.min(units.length - 1, Math.floor(Math.log(value) / Math.log(1024)));
+  return (value / Math.pow(1024, index)).toFixed(index > 1 ? 2 : 0) + ' ' + units[index];
 }
 
 export function AdminCentre({ onExit, onNotice, previewOnly = false }: { onExit: () => void; onNotice: (message: string) => void; previewOnly?: boolean }) {
@@ -114,13 +142,21 @@ export function AdminCentre({ onExit, onNotice, previewOnly = false }: { onExit:
   const [trackGenre, setTrackGenre] = useState('');
   const [trackNumber, setTrackNumber] = useState('1');
   const [trackDuration, setTrackDuration] = useState('0');
-  const [audioFile, setAudioFile] = useState<File | null>(null);
+  const [audioFiles, setAudioFiles] = useState<File[]>([]);
+  const [videoFile, setVideoFile] = useState<File | null>(null);
+  const [uploadProgress, setUploadProgress] = useState('');
+  const [storageUsage, setStorageUsage] = useState<{
+    provider: string; r2Connected: boolean; usedBytes: number; limitBytes: number;
+    warningBytes: number; percentUsed: number; canUpload: boolean;
+  } | null>(null);
 
   const [editingTrack, setEditingTrack] = useState<Track | null>(null);
   const [editTitle, setEditTitle] = useState('');
   const [editGenre, setEditGenre] = useState('');
   const [editNumber, setEditNumber] = useState('1');
   const [editDuration, setEditDuration] = useState('0');
+  const [editVideoFile, setEditVideoFile] = useState<File | null>(null);
+  const [removeExistingVideo, setRemoveExistingVideo] = useState(false);
 
   const loadData = async () => {
     setError('');
@@ -132,12 +168,14 @@ export function AdminCentre({ onExit, onNotice, previewOnly = false }: { onExit:
       return;
     }
     try {
-      const [albumResult, trackResult] = await Promise.all([
+      const [albumResult, trackResult, storageResult] = await Promise.all([
         adminApi<{ albums: Album[] }>('/api/admin/albums'),
         adminApi<{ tracks: Track[] }>('/api/admin/tracks'),
+        adminApi<{ provider: string; r2Connected: boolean; usedBytes: number; limitBytes: number; warningBytes: number; percentUsed: number; canUpload: boolean }>('/api/admin/media'),
       ]);
       setAlbums(albumResult.albums);
       setTracks(trackResult.tracks);
+      setStorageUsage(storageResult);
       setSelectedAlbum((current) => current || albumResult.albums[0]?.id || '');
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Could not load the music library.');
@@ -191,54 +229,105 @@ export function AdminCentre({ onExit, onNotice, previewOnly = false }: { onExit:
   };
 
   const onAudioSelected = (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0] ?? null;
-    setAudioFile(file);
-    if (!file) return;
-    const objectUrl = URL.createObjectURL(file);
-    const audio = new Audio();
-    audio.preload = 'metadata';
-    audio.onloadedmetadata = () => {
-      if (Number.isFinite(audio.duration)) setTrackDuration(String(Math.floor(audio.duration)));
-      URL.revokeObjectURL(objectUrl);
-    };
-    audio.onerror = () => URL.revokeObjectURL(objectUrl);
-    audio.src = objectUrl;
+    const files = Array.from(event.target.files ?? []);
+    setAudioFiles(files);
+    setTrackTitle(files.length === 1 ? files[0].name.replace(/\.[^.]+$/, '') : '');
+    setVideoFile(null);
+    if (files.length === 1) {
+      void readMediaDuration(files[0], 'audio').then((duration) => setTrackDuration(String(Math.floor(duration)))).catch(() => setTrackDuration('0'));
+    } else {
+      setTrackDuration('0');
+    }
   };
 
   const submitTrack = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (previewOnly) return;
-    if (!selectedAlbum || !trackTitle.trim() || !audioFile) {
-      setError('Choose an album, enter a track title, and select an audio file.');
+    if (!selectedAlbum || audioFiles.length === 0) {
+      setError('Choose an album and select at least one audio file.');
+      return;
+    }
+    if (videoFile && audioFiles.length !== 1) {
+      setError('Attach a Canvas video during upload only when selecting one song. For bulk uploads, add videos later using Edit on each track.');
       return;
     }
     setBusy(true);
     setError('');
+    const failures: string[] = [];
+    const completed: string[] = [];
     try {
-      const audioPath = await uploadMedia(audioFile, 'audio');
-      await adminApi('/api/admin/tracks', {
-        method: 'POST',
-        body: JSON.stringify({
-          albumId: selectedAlbum,
-          title: trackTitle.trim(),
-          genre: trackGenre.trim(),
-          duration: Number(trackDuration) || 0,
-          trackNumber: Number(trackNumber),
-          audioPath,
-        }),
-      });
+      let videoDuration = 0;
+      if (videoFile) {
+        videoDuration = await readMediaDuration(videoFile, 'video');
+        if (videoDuration > 15.05) throw new Error('Canvas videos must be 15 seconds or shorter.');
+      }
+      for (let index = 0; index < audioFiles.length; index += 1) {
+        const file = audioFiles[index];
+        const title = audioFiles.length === 1 && trackTitle.trim()
+          ? trackTitle.trim()
+          : file.name.replace(/\.[^.]+$/, '').slice(0, 120);
+        setUploadProgress('Uploading ' + (index + 1) + ' of ' + audioFiles.length + ': ' + file.name);
+        let audioPath = '';
+        try {
+          const detectedDuration = await readMediaDuration(file, 'audio').catch(() => 0);
+          const duration = audioFiles.length === 1 && Number(trackDuration) > 0
+            ? Number(trackDuration)
+            : Math.floor(detectedDuration);
+          audioPath = await uploadMedia(file, 'audio');
+          const created = await adminApi<{ track: { id: string } }>('/api/admin/tracks', {
+            method: 'POST',
+            body: JSON.stringify({
+              albumId: selectedAlbum,
+              title,
+              genre: trackGenre.trim(),
+              duration,
+              trackNumber: Number(trackNumber) + index,
+              audioPath,
+            }),
+          });
+          if (videoFile && index === 0) {
+            setUploadProgress('Uploading Canvas video for ' + title);
+            const videoPath = await uploadMedia(videoFile, 'video', videoDuration);
+            await adminApi('/api/admin/tracks/' + encodeURIComponent(created.track.id), {
+              method: 'PATCH',
+              body: JSON.stringify({
+                title,
+                genre: trackGenre.trim(),
+                duration,
+                trackNumber: Number(trackNumber),
+                videoPath,
+              }),
+            });
+          }
+          completed.push(title);
+        } catch (cause) {
+          if (audioPath) {
+            const mediaId = audioPath.slice('/media/'.length);
+            await adminApi('/api/admin/media/' + encodeURIComponent(mediaId), { method: 'DELETE' }).catch(() => undefined);
+          }
+          failures.push(file.name + ': ' + (cause instanceof Error ? cause.message : 'Upload failed.'));
+        }
+      }
+      setAudioFiles([]);
+      setVideoFile(null);
       setTrackTitle('');
       setTrackGenre('');
-      setTrackNumber('1');
+      setTrackNumber(String(Math.max(1, Number(trackNumber) + completed.length)));
       setTrackDuration('0');
-      setAudioFile(null);
       const input = document.getElementById('admin-audio-file') as HTMLInputElement | null;
       if (input) input.value = '';
+      const videoInput = document.getElementById('admin-video-file') as HTMLInputElement | null;
+      if (videoInput) videoInput.value = '';
       await loadData();
-      onNotice('Track uploaded. It is now saved in the selected album.');
+      if (failures.length) {
+        setError(completed.length + ' track(s) uploaded. Some files need attention: ' + failures.join(' | '));
+      } else {
+        onNotice(completed.length + ' track' + (completed.length === 1 ? '' : 's') + ' uploaded successfully.');
+      }
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Could not upload the track.');
+      setError(cause instanceof Error ? cause.message : 'Could not upload the selected tracks.');
     } finally {
+      setUploadProgress('');
       setBusy(false);
     }
   };
@@ -320,6 +409,8 @@ export function AdminCentre({ onExit, onNotice, previewOnly = false }: { onExit:
     setEditGenre(track.genre ?? '');
     setEditNumber(String(track.track_number ?? 1));
     setEditDuration(String(track.duration_seconds ?? 0));
+    setEditVideoFile(null);
+    setRemoveExistingVideo(false);
   };
 
   const saveTrackEdit = async (event: FormEvent<HTMLFormElement>) => {
@@ -329,6 +420,14 @@ export function AdminCentre({ onExit, onNotice, previewOnly = false }: { onExit:
     setBusy(true);
     setError('');
     try {
+      let videoPath: string | null | undefined;
+      if (editVideoFile) {
+        const videoDuration = await readMediaDuration(editVideoFile, 'video');
+        if (videoDuration > 15.05) throw new Error('Canvas videos must be 15 seconds or shorter.');
+        videoPath = await uploadMedia(editVideoFile, 'video', videoDuration);
+      } else if (removeExistingVideo) {
+        videoPath = null;
+      }
       await adminApi('/api/admin/tracks/' + encodeURIComponent(editingTrack.id), {
         method: 'PATCH',
         body: JSON.stringify({
@@ -336,11 +435,14 @@ export function AdminCentre({ onExit, onNotice, previewOnly = false }: { onExit:
           genre: editGenre.trim(),
           trackNumber: Number(editNumber),
           duration: Number(editDuration),
+          ...(videoPath !== undefined ? { videoPath } : {}),
         }),
       });
       setEditingTrack(null);
+      setEditVideoFile(null);
+      setRemoveExistingVideo(false);
       await loadData();
-      onNotice('Track details updated.');
+      onNotice(videoPath === null ? 'Track updated and Canvas video removed.' : editVideoFile ? 'Track and Canvas video updated.' : 'Track details updated.');
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Could not update the track.');
     } finally {
