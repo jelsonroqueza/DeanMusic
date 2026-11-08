@@ -80,6 +80,45 @@ async function sha256Hex(value: string): Promise<string> {
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
+
+async function ensureAdminSchema(env: Env): Promise<void> {
+  // The first valid owner activation can safely recover the Admin Centre schema
+  // if the production D1 database missed migration 0002.
+  const adminTableSql = `CREATE TABLE IF NOT EXISTS admins (
+    user_id TEXT PRIMARY KEY NOT NULL REFERENCES user(id) ON DELETE CASCADE,
+    role TEXT NOT NULL DEFAULT 'admin' CHECK (role = 'admin'),
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )`;
+  await env.DB.prepare(adminTableSql).run();
+
+  const tableInfo = await env.DB.prepare('PRAGMA table_info(albums)').all<{ name: string }>();
+  const columns = new Set((tableInfo.results ?? []).map((column) => column.name));
+  const additions = [
+    ['description', 'ALTER TABLE albums ADD COLUMN description TEXT'],
+    ['is_published', 'ALTER TABLE albums ADD COLUMN is_published INTEGER NOT NULL DEFAULT 0 CHECK (is_published IN (0, 1))'],
+    ['published_at', 'ALTER TABLE albums ADD COLUMN published_at TEXT'],
+    ['created_by', 'ALTER TABLE albums ADD COLUMN created_by TEXT']
+  ] as const;
+
+  for (const [columnName, statement] of additions) {
+    if (columns.has(columnName)) continue;
+    try {
+      await env.DB.prepare(statement).run();
+    } catch (error) {
+      // If another simultaneous first-activation request added this column,
+      // accept the recovered schema; otherwise preserve the original error.
+      const refreshed = await env.DB.prepare('PRAGMA table_info(albums)').all<{ name: string }>();
+      if (!(refreshed.results ?? []).some((column) => column.name === columnName)) throw error;
+    }
+  }
+
+  await env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_albums_public ON albums(is_published, published_at DESC)').run();
+  await env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_playlists_public ON playlists(is_public, created_at DESC)').run();
+  await env.DB.prepare(
+    'UPDATE albums SET is_published = 1, published_at = COALESCE(published_at, created_at) WHERE id IN (SELECT DISTINCT album_id FROM tracks WHERE is_published = 1 AND album_id IS NOT NULL)'
+  ).run();
+}
+
 async function isAdmin(user: UserRecord, env: Env): Promise<boolean> {
   if (env.ADMIN_ACCESS_DISABLED === 'true') return false;
   const record = await env.DB.prepare('SELECT user_id FROM admins WHERE user_id = ?')
@@ -394,6 +433,13 @@ export const onRequest = async ({ request, env }: Context): Promise<Response> =>
       const actualHash = await sha256Hex(token);
       if (!constantTimeEqual(actualHash, expectedHash)) {
         return reply({ error: 'The one-time activation code is invalid or expired.' }, 403);
+      }
+
+      try {
+        await ensureAdminSchema(env);
+      } catch (error) {
+        console.error('DeanMusic Admin Centre schema recovery failed:', error);
+        return reply({ error: 'Admin database setup is incomplete. The activation code was not used; please retry after the database setup is repaired.' }, 503);
       }
 
       const existing = await env.DB.prepare('SELECT user_id FROM admins LIMIT 1').first();
