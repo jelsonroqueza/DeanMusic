@@ -25,3 +25,28 @@ jobs:
         run: npm install --no-audit --no-fund
       - name: Type-check and build frontend
         run: npm run build
+      - name: Bundle Cloudflare Pages Functions
+        run: |
+          mkdir -p .wrangler
+          npx wrangler pages functions build functions --outfile .wrangler/functions.js --outdir .wrangler/functions --output-config-path .wrangler/config.json
+      - name: Validate D1 migration
+        run: |
+          python3 - <<'PY'
+          import sqlite3
+          from pathlib import Path
+
+          sql = Path("cloudflare/migrations/0001_init.sql").read_text(encoding="utf-8")
+          db = sqlite3.connect(":memory:")
+          db.executescript(sql)
+          expected = {
+              "user", "session", "account", "verification", "artists", "albums",
+              "tracks", "playlists", "playlist_tracks", "liked_tracks", "follows",
+              "saved_albums", "recently_played"
+          }
+          actual = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+          missing = expected - actual
+          assert not missing, f"Missing tables: {sorted(missing)}"
+          track = db.execute("SELECT title, audio_path FROM tracks WHERE id='demo-midnight'").fetchone()
+          assert track == ("Midnight Reverie", "browser-synth"), track
+          print("D1 migration SQL passed SQLite validation; all expected tables and demo track exist.")
+          PY
