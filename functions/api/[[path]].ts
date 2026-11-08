@@ -253,6 +253,26 @@ async function reserveMediaAsset(
   return Number(result.meta.changes ?? 0) === 1;
 }
 
+
+async function tracksWithCanvas(
+  env: Env,
+  canvasSql: string,
+  legacySql: string,
+  values: unknown[] = []
+): Promise<Array<Record<string, unknown>>> {
+  try {
+    const statement = env.DB.prepare(canvasSql);
+    const result = await (values.length ? statement.bind(...values) : statement).all<Record<string, unknown>>();
+    return result.results ?? [];
+  } catch (error) {
+    // Until the first authorized Admin Centre visit provisions video_path,
+    // keep public catalog, playlists, and likes fully available without Canvas.
+    const statement = env.DB.prepare(legacySql);
+    const result = await (values.length ? statement.bind(...values) : statement).all<Record<string, unknown>>();
+    return (result.results ?? []).map((row) => ({ ...row, video_path: null }));
+  }
+}
+
 async function uploadMedia(request: Request, env: Env, admin: UserRecord): Promise<Response> {
   let form: FormData;
   try { form = await request.formData(); }
@@ -449,15 +469,16 @@ export const onRequest = async ({ request, env }: Context): Promise<Response> =>
 
     if (path === '/api/health' && request.method === 'GET') {
       await env.DB.prepare('SELECT 1 AS ok').first();
-      return reply({ ok: true, service: 'DeanMusic API', database: 'Cloudflare D1', media: 'Cloudflare Workers KV' });
+      return reply({ ok: true, service: 'DeanMusic API', database: 'Cloudflare D1', media: env.MEDIA_R2 ? 'Cloudflare R2' : 'Cloudflare Workers KV' });
     }
 
     if (path === '/api/catalog' && request.method === 'GET') {
-      await ensureMediaSchema(env);
-      const result = await env.DB.prepare(
-        'SELECT t.id, t.title, t.duration_seconds, t.genre, t.audio_path, t.video_path, t.external_audio_url, t.plays_count, ar.name AS artist_name, al.title AS album_title, al.cover_url FROM tracks t INNER JOIN artists ar ON ar.id = t.artist_id LEFT JOIN albums al ON al.id = t.album_id WHERE t.is_published = 1 ORDER BY t.plays_count DESC, t.created_at DESC LIMIT 100'
-      ).all();
-      return reply({ tracks: result.results }, 200, 'public, max-age=60, stale-while-revalidate=300');
+      const tracks = await tracksWithCanvas(
+        env,
+        'SELECT t.id, t.title, t.duration_seconds, t.genre, t.audio_path, t.video_path, t.external_audio_url, t.plays_count, ar.name AS artist_name, al.title AS album_title, al.cover_url FROM tracks t INNER JOIN artists ar ON ar.id = t.artist_id LEFT JOIN albums al ON al.id = t.album_id WHERE t.is_published = 1 ORDER BY t.plays_count DESC, t.created_at DESC LIMIT 100',
+        'SELECT t.id, t.title, t.duration_seconds, t.genre, t.audio_path, t.external_audio_url, t.plays_count, ar.name AS artist_name, al.title AS album_title, al.cover_url FROM tracks t INNER JOIN artists ar ON ar.id = t.artist_id LEFT JOIN albums al ON al.id = t.album_id WHERE t.is_published = 1 ORDER BY t.plays_count DESC, t.created_at DESC LIMIT 100'
+      );
+      return reply({ tracks }, 200, 'public, max-age=60, stale-while-revalidate=300');
     }
 
     if (path === '/api/albums' && request.method === 'GET') {
@@ -473,11 +494,13 @@ export const onRequest = async ({ request, env }: Context): Promise<Response> =>
         'SELECT al.id, al.title, al.description, al.cover_url, al.release_date, al.genre, ar.name AS artist_name FROM albums al INNER JOIN artists ar ON ar.id = al.artist_id WHERE al.id = ? AND al.is_published = 1'
       ).bind(publicAlbumMatch[1]).first();
       if (!album) return reply({ error: 'Album not found.' }, 404);
-      await ensureMediaSchema(env);
-      const tracks = await env.DB.prepare(
-        'SELECT id, title, duration_seconds, track_number, genre, audio_path, video_path, external_audio_url, plays_count FROM tracks WHERE album_id = ? AND is_published = 1 ORDER BY track_number ASC, created_at ASC'
-      ).bind(publicAlbumMatch[1]).all();
-      return reply({ album, tracks: tracks.results }, 200, 'public, max-age=60, stale-while-revalidate=300');
+      const tracks = await tracksWithCanvas(
+        env,
+        'SELECT id, title, duration_seconds, track_number, genre, audio_path, video_path, external_audio_url, plays_count FROM tracks WHERE album_id = ? AND is_published = 1 ORDER BY track_number ASC, created_at ASC',
+        'SELECT id, title, duration_seconds, track_number, genre, audio_path, external_audio_url, plays_count FROM tracks WHERE album_id = ? AND is_published = 1 ORDER BY track_number ASC, created_at ASC',
+        [publicAlbumMatch[1]]
+      );
+      return reply({ album, tracks }, 200, 'public, max-age=60, stale-while-revalidate=300');
     }
 
     if (path === '/api/public-playlists' && request.method === 'GET') {
@@ -522,11 +545,13 @@ export const onRequest = async ({ request, env }: Context): Promise<Response> =>
         'SELECT p.id, p.owner_id, p.name, p.description, p.cover_url, p.is_public, p.created_at, u.name AS owner_name FROM playlists p INNER JOIN user u ON u.id = p.owner_id WHERE p.id = ? AND (p.is_public = 1 OR p.owner_id = ?)'
       ).bind(publicOrOwnedPlaylist[1], user?.id ?? '').first();
       if (!playlist) return reply({ error: 'Playlist not found.' }, 404);
-      await ensureMediaSchema(env);
-      const tracks = await env.DB.prepare(
-        'SELECT t.id, t.title, t.duration_seconds, t.genre, t.audio_path, t.video_path, t.external_audio_url, t.plays_count, ar.name AS artist_name, al.title AS album_title FROM playlist_tracks pt INNER JOIN tracks t ON t.id = pt.track_id INNER JOIN artists ar ON ar.id = t.artist_id LEFT JOIN albums al ON al.id = t.album_id WHERE pt.playlist_id = ? AND t.is_published = 1 ORDER BY pt.position ASC'
-      ).bind(publicOrOwnedPlaylist[1]).all();
-      return reply({ playlist, tracks: tracks.results }, 200, playlist.is_public ? 'public, max-age=30' : 'no-store');
+      const tracks = await tracksWithCanvas(
+        env,
+        'SELECT t.id, t.title, t.duration_seconds, t.genre, t.audio_path, t.video_path, t.external_audio_url, t.plays_count, ar.name AS artist_name, al.title AS album_title FROM playlist_tracks pt INNER JOIN tracks t ON t.id = pt.track_id INNER JOIN artists ar ON ar.id = t.artist_id LEFT JOIN albums al ON al.id = t.album_id WHERE pt.playlist_id = ? AND t.is_published = 1 ORDER BY pt.position ASC',
+        'SELECT t.id, t.title, t.duration_seconds, t.genre, t.audio_path, t.external_audio_url, t.plays_count, ar.name AS artist_name, al.title AS album_title FROM playlist_tracks pt INNER JOIN tracks t ON t.id = pt.track_id INNER JOIN artists ar ON ar.id = t.artist_id LEFT JOIN albums al ON al.id = t.album_id WHERE pt.playlist_id = ? AND t.is_published = 1 ORDER BY pt.position ASC',
+        [publicOrOwnedPlaylist[1]]
+      );
+      return reply({ playlist, tracks }, 200, playlist.is_public ? 'public, max-age=30' : 'no-store');
     }
 
     const playlistDelete = path.match(/^\/api\/playlists\/([a-zA-Z0-9_-]+)$/);
@@ -577,11 +602,13 @@ export const onRequest = async ({ request, env }: Context): Promise<Response> =>
     if (path === '/api/liked-tracks' && request.method === 'GET') {
       const user = await getUser(request, env);
       if (!user) return reply({ error: 'Sign in required.' }, 401);
-      await ensureMediaSchema(env);
-      const result = await env.DB.prepare(
-        'SELECT t.id, t.title, t.genre, t.duration_seconds, t.audio_path, t.video_path, ar.name AS artist_name, al.title AS album_title FROM liked_tracks l INNER JOIN tracks t ON t.id = l.track_id INNER JOIN artists ar ON ar.id = t.artist_id LEFT JOIN albums al ON al.id = t.album_id WHERE l.user_id = ? AND t.is_published = 1 ORDER BY l.liked_at DESC LIMIT 500'
-      ).bind(user.id).all();
-      return reply({ tracks: result.results });
+      const tracks = await tracksWithCanvas(
+        env,
+        'SELECT t.id, t.title, t.genre, t.duration_seconds, t.audio_path, t.video_path, ar.name AS artist_name, al.title AS album_title FROM liked_tracks l INNER JOIN tracks t ON t.id = l.track_id INNER JOIN artists ar ON ar.id = t.artist_id LEFT JOIN albums al ON al.id = t.album_id WHERE l.user_id = ? AND t.is_published = 1 ORDER BY l.liked_at DESC LIMIT 500',
+        'SELECT t.id, t.title, t.genre, t.duration_seconds, t.audio_path, ar.name AS artist_name, al.title AS album_title FROM liked_tracks l INNER JOIN tracks t ON t.id = l.track_id INNER JOIN artists ar ON ar.id = t.artist_id LEFT JOIN albums al ON al.id = t.album_id WHERE l.user_id = ? AND t.is_published = 1 ORDER BY l.liked_at DESC LIMIT 500',
+        [user.id]
+      );
+      return reply({ tracks });
     }
 
     const likeRoute = path.match(/^\/api\/likes\/([a-zA-Z0-9_-]+)$/);
