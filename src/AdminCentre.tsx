@@ -268,6 +268,8 @@ export function AdminCentre({ onExit, onNotice, previewOnly = false }: { onExit:
           : file.name.replace(/\.[^.]+$/, '').slice(0, 120);
         setUploadProgress('Uploading ' + (index + 1) + ' of ' + audioFiles.length + ': ' + file.name);
         let audioPath = '';
+        let createdTrackId = '';
+        let unattachedVideoPath = '';
         try {
           const detectedDuration = await readMediaDuration(file, 'audio').catch(() => 0);
           const duration = audioFiles.length === 1 && Number(trackDuration) > 0
@@ -285,25 +287,27 @@ export function AdminCentre({ onExit, onNotice, previewOnly = false }: { onExit:
               audioPath,
             }),
           });
+          createdTrackId = created.track.id;
           if (videoFile && index === 0) {
             setUploadProgress('Uploading Canvas video for ' + title);
-            const videoPath = await uploadMedia(videoFile, 'video', videoDuration);
+            unattachedVideoPath = await uploadMedia(videoFile, 'video', videoDuration);
             await adminApi('/api/admin/tracks/' + encodeURIComponent(created.track.id), {
               method: 'PATCH',
-              body: JSON.stringify({
-                title,
-                genre: trackGenre.trim(),
-                duration,
-                trackNumber: Number(trackNumber),
-                videoPath,
-              }),
+              body: JSON.stringify({ title, genre: trackGenre.trim(), duration, trackNumber: Number(trackNumber), videoPath: unattachedVideoPath }),
             });
+            unattachedVideoPath = '';
           }
           completed.push(title);
         } catch (cause) {
-          if (audioPath) {
+          if (createdTrackId) {
+            await adminApi('/api/admin/tracks/' + encodeURIComponent(createdTrackId), { method: 'DELETE' }).catch(() => undefined);
+          } else if (audioPath) {
             const mediaId = audioPath.slice('/media/'.length);
             await adminApi('/api/admin/media/' + encodeURIComponent(mediaId), { method: 'DELETE' }).catch(() => undefined);
+          }
+          if (unattachedVideoPath) {
+            const videoId = unattachedVideoPath.slice('/media/'.length);
+            await adminApi('/api/admin/media/' + encodeURIComponent(videoId), { method: 'DELETE' }).catch(() => undefined);
           }
           failures.push(file.name + ': ' + (cause instanceof Error ? cause.message : 'Upload failed.'));
         }
