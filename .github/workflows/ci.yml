@@ -29,24 +29,36 @@ jobs:
         run: |
           mkdir -p .wrangler
           npx wrangler pages functions build functions --outdir .wrangler/functions --output-config-path .wrangler/config.json
-      - name: Validate D1 migration
+      - name: Validate all D1 migrations
         run: |
           python3 - <<'PY'
           import sqlite3
           from pathlib import Path
 
-          sql = Path("cloudflare/migrations/0001_init.sql").read_text(encoding="utf-8")
+          migration_dir = Path("cloudflare/migrations")
+          migrations = sorted(migration_dir.glob("*.sql"))
+          assert migrations, "No D1 migrations found."
+
           db = sqlite3.connect(":memory:")
-          db.executescript(sql)
+          for migration in migrations:
+              db.executescript(migration.read_text(encoding="utf-8"))
+              print(f"Applied {migration.name} to the validation database.")
+
           expected = {
               "user", "session", "account", "verification", "artists", "albums",
               "tracks", "playlists", "playlist_tracks", "liked_tracks", "follows",
-              "saved_albums", "recently_played"
+              "saved_albums", "recently_played", "admins"
           }
           actual = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
           missing = expected - actual
-          assert not missing, f"Missing tables: {sorted(missing)}"
+          assert not missing, f"Missing tables after all migrations: {sorted(missing)}"
+
+          album_columns = {row[1] for row in db.execute("PRAGMA table_info(albums)")}
+          required_album_columns = {"description", "is_published", "published_at", "created_by"}
+          missing_columns = required_album_columns - album_columns
+          assert not missing_columns, f"Missing Admin Centre album columns: {sorted(missing_columns)}"
+
           track = db.execute("SELECT title, audio_path FROM tracks WHERE id='demo-midnight'").fetchone()
           assert track == ("Midnight Reverie", "browser-synth"), track
-          print("D1 migration SQL passed SQLite validation; all expected tables and demo track exist.")
+          print("All D1 migrations passed SQLite validation; Admin Centre schema and demo track are present.")
           PY
