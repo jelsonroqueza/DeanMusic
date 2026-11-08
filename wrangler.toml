@@ -22,4 +22,3 @@ ADMIN_ACCESS_DISABLED = "true"
 
 [env.production.vars]
 APP_ORIGIN = "https://deanmusic.pages.dev"
-ADMIN_EMAILS = "jelsonroqueza@gmail.com"
