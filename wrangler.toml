@@ -1,0 +1,13 @@
+name = "deanmusic"
+compatibility_date = "2026-11-08"
+compatibility_flags = ["nodejs_compat"]
+pages_build_output_dir = "./dist"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "deanmusic-db"
+database_id = "REPLACE_WITH_DEANMUSIC_D1_DATABASE_ID"
+migrations_dir = "cloudflare/migrations"
+
+[vars]
+APP_ORIGIN = "https://REPLACE_WITH_DEANMUSIC.pages.dev"
