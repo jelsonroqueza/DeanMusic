@@ -289,7 +289,7 @@ export default function App() {
       try { await video.play(); } catch { /* Muted inline playback may be blocked on older browsers. */ }
     };
     void syncAndPlay();
-  }, [active?.id, active?.videoUrl, playing]);
+  }, [page, active?.id, active?.videoUrl, playing]);
 
   useEffect(() => {
     if (!playing || !active?.videoUrl) return;
