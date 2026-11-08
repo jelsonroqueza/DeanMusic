@@ -6,8 +6,8 @@ pages_build_output_dir = "./dist"
 [[d1_databases]]
 binding = "DB"
 database_name = "deanmusic-db"
-database_id = "REPLACE_WITH_DEANMUSIC_D1_DATABASE_ID"
+database_id = "77f089ff-6bcd-417e-927a-4fc8e8bd04e0"
 migrations_dir = "cloudflare/migrations"
 
 [vars]
-APP_ORIGIN = "https://REPLACE_WITH_DEANMUSIC.pages.dev"
+APP_ORIGIN = "https://deanmusic.pages.dev"
