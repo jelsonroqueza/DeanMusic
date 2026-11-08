@@ -36,11 +36,15 @@ In the DeanMusic Pages project, open Settings > Variables and Secrets. Configure
 
 - `BETTER_AUTH_SECRET`: encrypted secret, at least 32 random characters. Generate a new random value and keep it private.
 - `APP_ORIGIN`: the exact origin of this Pages website, for example `https://deanmusic.pages.dev`.
-- `ADMIN_EMAILS`: optional plain variable containing a comma-separated allowlist of admin email addresses.
+- `ADMIN_EMAILS`: plain variable containing the comma-separated email allowlist for DeanMusic administrators. The API compares the signed-in session email server-side.
 
 Never put these values in a `VITE_` variable, GitHub file, frontend code, or chat. Never share the Better Auth secret.
 
-## 4. Apply the D1 migration
+## 4. Configure the first administrator
+
+In Pages > Settings > Variables and Secrets, add `ADMIN_EMAILS` to both Preview and Production with the exact approved administrator email address(es), separated by commas. Save and redeploy. This is a server-side variable, not a `VITE_` frontend variable. The existing `admins` D1 table remains supported for additional database-managed administrators.
+
+## 5. Apply the D1 migration
 
 From a terminal inside this repository:
 
@@ -52,7 +56,7 @@ npx wrangler d1 migrations apply deanmusic-db --remote
 
 Wrangler reads the single migration from `cloudflare/migrations` as configured in `wrangler.toml`. Review the target database name before confirming. The migration creates Better Auth core tables, the music catalog, user-owned playlist/like tables, indexes, and one demo track.
 
-## 5. Verify
+## 6. Verify
 
 After the next deployment, check:
 
