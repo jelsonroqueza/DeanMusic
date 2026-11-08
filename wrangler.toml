@@ -15,3 +15,11 @@ id = "d962e53d719940c386c02a2da54b71ba"
 
 [vars]
 APP_ORIGIN = "https://deanmusic.pages.dev"
+
+[env.preview.vars]
+APP_ORIGIN = "https://deanmusic.pages.dev"
+ADMIN_ACCESS_DISABLED = "true"
+
+[env.production.vars]
+APP_ORIGIN = "https://deanmusic.pages.dev"
+ADMIN_EMAILS = "jelsonroqueza@gmail.com"

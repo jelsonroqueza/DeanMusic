@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type CSSProperties } from 'react';
+import { AdminCentre } from './AdminCentre';
 
 type Track = {
   id: string;
@@ -8,10 +9,11 @@ type Track = {
   genre: string;
   duration: number;
   plays: number;
+  audioUrl: string | null;
 };
 type Playlist = { id: string; name: string; description: string | null; is_public: number };
 type User = { id: string; name: string; email: string };
-type Page = 'home' | 'search' | 'library' | 'profile';
+type Page = 'home' | 'search' | 'library' | 'profile' | 'admin';
 
 const demoTrack: Track = {
   id: 'demo-midnight',
@@ -21,6 +23,7 @@ const demoTrack: Track = {
   genre: 'Electronic',
   duration: 24,
   plays: 1280,
+  audioUrl: null,
 };
 
 const collections = [
@@ -62,6 +65,9 @@ function asTrack(row: Record<string, unknown>): Track {
     genre: String(row.genre ?? 'Other'),
     duration: Number(row.duration_seconds ?? row.duration ?? 24),
     plays: Number(row.plays_count ?? row.plays ?? 0),
+    audioUrl: typeof row.audio_path === 'string' && row.audio_path.startsWith('/media/')
+      ? row.audio_path
+      : (typeof row.external_audio_url === 'string' && /^https:\/\//i.test(row.external_audio_url) ? row.external_audio_url : null),
   };
 }
 
@@ -142,13 +148,15 @@ function mapCollectionSearch(term: string, setQuery: (value: string) => void, se
 }
 
 export default function App() {
-  const [page, setPage] = useState<Page>('home');
+  const adminPreviewMode = new URLSearchParams(window.location.search).get('admin-preview') === '1';
+  const [page, setPage] = useState<Page>(() => adminPreviewMode ? 'admin' : 'home');
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState('All');
   const [tracks, setTracks] = useState<Track[]>([demoTrack]);
   const [liked, setLiked] = useState<string[]>([]);
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
   const [user, setUser] = useState<User | null>(null);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [authOpen, setAuthOpen] = useState(false);
   const [authMode, setAuthMode] = useState<'signin' | 'signup'>('signin');
   const [name, setName] = useState('');
@@ -171,6 +179,7 @@ export default function App() {
   const [selectedPlaylist, setSelectedPlaylist] = useState<{ playlist: Playlist; tracks: Track[] } | null>(null);
 
   const audioContext = useRef<AudioContext | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
   const soundNodes = useRef<OscillatorNode[]>([]);
   const gainNode = useRef<GainNode | null>(null);
   const ticker = useRef<number | null>(null);
@@ -183,6 +192,7 @@ export default function App() {
   };
 
   const stopSound = () => {
+    audioRef.current?.pause();
     if (ticker.current !== null) window.clearInterval(ticker.current);
     ticker.current = null;
     soundNodes.current.forEach((node) => {
@@ -231,6 +241,18 @@ export default function App() {
     }, 200);
   };
 
+  const startAudio = async (track: Track, from = seconds) => {
+    stopSound();
+    const audio = audioRef.current;
+    if (!audio || !track.audioUrl) return;
+    if (audio.getAttribute('src') !== track.audioUrl) audio.src = track.audioUrl;
+    const safeStart = Number.isFinite(audio.duration) ? Math.min(from, audio.duration) : from;
+    audio.currentTime = Math.max(0, safeStart);
+    audio.volume = volume;
+    await audio.play();
+    setPlaying(true);
+  };
+
   useEffect(() => () => {
     if (ticker.current !== null) window.clearInterval(ticker.current);
     if (toastTimer.current !== null) window.clearTimeout(toastTimer.current);
@@ -242,6 +264,7 @@ export default function App() {
 
   useEffect(() => {
     if (gainNode.current) gainNode.current.gain.value = volume * 0.12;
+    if (audioRef.current) audioRef.current.volume = volume;
   }, [volume]);
 
   const loadLibrary = async (current: User) => {
@@ -256,6 +279,12 @@ export default function App() {
       notify(error instanceof Error ? error.message : 'Could not load your library.');
     }
     setUser(current);
+    try {
+      const status = await api<{ isAdmin: boolean }>('/api/admin/status');
+      setIsAdmin(Boolean(status.isAdmin));
+    } catch {
+      setIsAdmin(false);
+    }
   };
 
   useEffect(() => {
@@ -311,7 +340,11 @@ export default function App() {
       return next;
     });
     void api('/api/plays/' + encodeURIComponent(track.id), { method: 'POST', body: '{}' }).catch(() => undefined);
-    void startSound(0, track.duration).catch(() => notify('Tap play again to enable audio.'));
+    if (track.audioUrl) {
+      void startAudio(track, 0).catch(() => notify('This audio file could not be played.'));
+    } else {
+      void startSound(0, track.duration).catch(() => notify('Tap play again to enable audio.'));
+    }
   };
 
   const toggleLike = async (id: string) => {
@@ -357,6 +390,7 @@ export default function App() {
       await api('/api/auth/sign-out', { method: 'POST', body: '{}' });
       stopSound();
       setUser(null);
+      setIsAdmin(false);
       setLiked([]);
       setPlaylists([]);
       setSelectedPlaylist(null);
@@ -406,6 +440,11 @@ export default function App() {
       if (tracks[0]) chooseTrack(tracks[0]);
       return;
     }
+    if (active.audioUrl) {
+      if (playing) audioRef.current?.pause();
+      else void startAudio(active, seconds).catch(() => notify('Audio playback is unavailable in this browser.'));
+      return;
+    }
     if (playing) stopSound();
     else void startSound(seconds, active.duration).catch(() => notify('Audio playback is unavailable in this browser.'));
   };
@@ -429,7 +468,11 @@ export default function App() {
   const seek = (value: number) => {
     const next = Math.max(0, Math.min(active?.duration ?? 24, value));
     setSeconds(next);
-    if (playing) void startSound(next, active?.duration ?? 24);
+    if (active?.audioUrl && audioRef.current) {
+      audioRef.current.currentTime = next;
+    } else if (playing) {
+      void startSound(next, active?.duration ?? 24);
+    }
   };
 
   const handleProfileAction = () => {
@@ -474,6 +517,7 @@ export default function App() {
                 {user ? <>
                   <strong>{user.name}</strong><small>{user.email}</small>
                   <button onClick={() => openPage('profile')}><Icon name="user" size={17} /> My profile</button>
+                  {isAdmin && <button onClick={() => openPage('admin')}><Icon name="music" size={17} /> Admin Centre</button>}
                   <button onClick={() => void signOut()}><Icon name="logout" size={17} /> Sign out</button>
                 </> : <>
                   <strong>Welcome to DeanMusic</strong>
@@ -628,6 +672,12 @@ export default function App() {
               </section>
             )}
 
+            {page === 'admin' && (((isAdmin && user) || adminPreviewMode) ? (
+              <AdminCentre previewOnly={adminPreviewMode && !(isAdmin && user)} onExit={() => openPage('home')} onNotice={notify} />
+            ) : (
+              <section className="page-section"><div className="empty-state"><strong>Admin access required</strong><p>This account is not authorized to manage DeanMusic.</p><button className="primary-button" onClick={() => openPage('home')}>Back to Home</button></div></section>
+            ))}
+
             {page === 'profile' && (
               <section className="page-section profile-page">
                 <p className="section-eyebrow">YOUR DEANMUSIC ACCOUNT</p>
@@ -663,6 +713,24 @@ export default function App() {
           </aside>
         </div>
       )}
+
+      <audio
+        hidden
+        ref={audioRef}
+        preload="metadata"
+        onTimeUpdate={() => { if (audioRef.current && !audioRef.current.paused) setSeconds(audioRef.current.currentTime); }}
+        onPlay={() => setPlaying(true)}
+        onPause={() => setPlaying(false)}
+        onEnded={() => {
+          if (repeat && audioRef.current) {
+            audioRef.current.currentTime = 0;
+            void audioRef.current.play().catch(() => setPlaying(false));
+          } else {
+            setPlaying(false);
+            setSeconds(0);
+          }
+        }}
+      />
 
       <footer className="player">
         <div className="now-playing">
