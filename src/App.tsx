@@ -414,6 +414,8 @@ export default function App() {
       stopSound();
       setUser(null);
       setIsAdmin(false);
+      setAdminBootstrapToken('');
+      setAdminBootstrapError('');
       setLiked([]);
       setPlaylists([]);
       setSelectedPlaylist(null);
