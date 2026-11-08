@@ -33,7 +33,20 @@ jobs:
         run: |
           python3 - <<'PY'
           import sqlite3
+          import tomllib
           from pathlib import Path
+
+          config = tomllib.loads(Path("wrangler.toml").read_text(encoding="utf-8"))
+          top_d1 = config.get("d1_databases", [])
+          top_kv = config.get("kv_namespaces", [])
+          production = config.get("env", {}).get("production", {})
+          preview = config.get("env", {}).get("preview", {})
+          production_d1 = production.get("d1_databases", [])
+          production_kv = production.get("kv_namespaces", [])
+          assert any(item.get("binding") == "DB" and item.get("database_id") == "77f089ff-6bcd-417e-927a-4fc8e8bd04e0" for item in production_d1), "Production DB binding is missing or does not point to DeanMusic D1."
+          assert any(item.get("binding") == "MEDIA" and item.get("id") == "d962e53d719940c386c02a2da54b71ba" for item in production_kv), "Production MEDIA binding is missing or does not point to DeanMusic KV."
+          assert not preview.get("d1_databases") and not preview.get("kv_namespaces"), "Preview must remain isolated until separate staging D1 and KV resources exist."
+          assert preview.get("vars", {}).get("ADMIN_ACCESS_DISABLED") == "true", "Preview admin access must remain disabled."
 
           migration_dir = Path("cloudflare/migrations")
           migrations = sorted(migration_dir.glob("*.sql"))

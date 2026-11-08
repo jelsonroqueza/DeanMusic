@@ -25,3 +25,15 @@ APP_ORIGIN = "https://deanmusic.pages.dev"
 ADMIN_BOOTSTRAP_EMAIL = "jelsonroqueza@gmail.com"
 ADMIN_BOOTSTRAP_SHA256 = "46a1eff2e9cd1b934d531466e6e683825672b90bc9ba3607910220a86ccba8c5"
 ADMIN_BOOTSTRAP_EXPIRES_AT = "2026-11-16T00:00:00Z"
+
+# Named Cloudflare Pages environments do not inherit top-level bindings.
+# Re-declare the real production resources here so the live API can reach D1 and KV.
+[[env.production.d1_databases]]
+binding = "DB"
+database_name = "deanmusic-db"
+database_id = "77f089ff-6bcd-417e-927a-4fc8e8bd04e0"
+migrations_dir = "cloudflare/migrations"
+
+[[env.production.kv_namespaces]]
+binding = "MEDIA"
+id = "d962e53d719940c386c02a2da54b71ba"
