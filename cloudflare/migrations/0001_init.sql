@@ -150,4 +150,4 @@ INSERT OR IGNORE INTO albums (id, artist_id, title, genre)
 VALUES ('signal-one', 'deanmusic-originals', 'Signal One', 'Electronic');
 
 INSERT OR IGNORE INTO tracks (id, album_id, artist_id, title, duration_seconds, track_number, genre, audio_path, is_published)
-VALUES ('demo-midnight', 'signal-one', 'deanmusic-originals', 'Midnight Reverie', 18, 1, 'Electronic', '/audio/deanmusic-demo.mp3', 1);
+VALUES ('demo-midnight', 'signal-one', 'deanmusic-originals', 'Midnight Reverie', 24, 1, 'Electronic', 'browser-synth', 1);
