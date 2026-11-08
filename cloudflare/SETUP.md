@@ -43,7 +43,7 @@ Never put these values in a `VITE_` variable, GitHub file, frontend code, or cha
 
 Admin privileges are granted only to an authenticated account whose user ID is explicitly present in the DeanMusic D1 `admins` table. Do not use an email allowlist while email verification is disabled. The first administrator can be provisioned once using the short-lived activation flow in the account Profile page. The token hash, approved email, and expiry are configured only in Production variables; the plain one-time token is not stored in the repository. Preview builds set `ADMIN_ACCESS_DISABLED = "true"` and cannot use Admin Centre endpoints. Keep Preview read-only until it has separate staging D1 and media-storage bindings.
 
-## 5. Apply the D1 migration
+## 5. Apply the D1 migrations
 
 From a terminal inside this repository:
 
@@ -53,7 +53,7 @@ npx wrangler login
 npx wrangler d1 migrations apply deanmusic-db --remote
 ```
 
-Wrangler reads the single migration from `cloudflare/migrations` as configured in `wrangler.toml`. Review the target database name before confirming. The migration creates Better Auth core tables, the music catalog, user-owned playlist/like tables, indexes, and one demo track.
+Wrangler reads all versioned SQL migrations from `cloudflare/migrations` as configured in `wrangler.toml`. Review the target database name before confirming. This applies the base schema (`0001_init.sql`) and the Admin Centre schema (`0002_public_albums_admin.sql`) in order. The first valid owner activation also has a narrowly scoped schema-recovery step if migration `0002` was missed.
 
 ## 6. Verify
 
@@ -72,6 +72,6 @@ If one check fails, stop and inspect the deployment logs and D1 migration state.
 ## Current limitations
 
 - The player currently plays an original browser-generated synth demo, not a third-party recording.
-- Admin Centre is deployed, but admin access remains locked until the first administrator is securely provisioned.
+- Admin Centre code is available in Production; admin access remains locked until the first administrator is securely provisioned. The first valid activation can recover missing Admin Centre schema after validating the owner account and one-time token.
 - Public launch of any uploaded music requires documented streaming/distribution rights.
 - R2 and Google Drive public streaming integration are not part of the strict $0 setup.

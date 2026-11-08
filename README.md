@@ -29,6 +29,8 @@ The first beta is a foundation, not a full Spotify replacement. Track uploads, a
 
 ## Admin Centre preview
 
+The first valid owner activation now performs an idempotent schema recovery for the Admin Centre tables and album columns if the production D1 database missed migration `0002`. This recovery runs only after the signed-in approved owner account and one-time activation token have both been validated. The CI workflow also validates every D1 migration in order, including the Admin Centre schema.
+
 The Admin Centre is available in Production only to authenticated user IDs explicitly provisioned in the DeanMusic D1 `admins` table. Preview deployments deliberately disable admin authorization. First-admin provisioning uses a short-lived, single-use activation token bound to the approved email; an email allowlist alone is not used because email verification is disabled. It supports album and artist metadata, cover art uploads, album publishing, track uploads, track detail editing, track deletion, and browser playback of uploaded audio. The current free-tier upload limits are 20 MB per audio file and 2 MB per cover image. Uploaded media is served from the existing Cloudflare Workers KV binding; keep original master files in private Google Drive as a separate archive until an automatic Drive backup integration is implemented.
 
 For a visual-only Admin Centre walkthrough, open the Cloudflare branch Preview URL with `?admin-preview=1`. This displays sample albums/tracks; uploads, publishing, editing, and deleting are disabled, and no catalog API is called by the demo panel.
@@ -59,11 +61,11 @@ For a visual-only Admin Centre walkthrough, open the Cloudflare branch Preview U
 4. Remain on Cloudflare Free. Do not select Workers Paid or activate R2.
 5. Create a new, separate D1 database named `deanmusic-db`. Do not use a GENMERCH database.
 6. Replace the placeholder `database_id` in `wrangler.toml` with this new DeanMusic D1 database ID.
-7. Apply the single migration `cloudflare/migrations/0001_init.sql` to that D1 database.
+7. Apply all pending migrations in order with `npx wrangler d1 migrations apply deanmusic-db --remote`. This applies the base schema (`0001_init.sql`) and the Admin Centre schema (`0002_public_albums_admin.sql`).
 8. In Pages > Settings > Variables and Secrets, set:
    - encrypted secret `BETTER_AUTH_SECRET` (generate a random secret of at least 32 characters)
    - plain variable `APP_ORIGIN` (the exact deployed `https://<project>.pages.dev` origin)
-   - optional plain variable `ADMIN_EMAILS` (comma-separated admin email allowlist)
+   - Production bootstrap settings (`ADMIN_BOOTSTRAP_EMAIL`, `ADMIN_BOOTSTRAP_SHA256`, `ADMIN_BOOTSTRAP_EXPIRES_AT`) are defined in `wrangler.toml`; email-only admin allowlists are not used.
 9. Redeploy. Test `/api/health`, registration, login, logout, liking a track, and playlist creation.
 
 ## D1 setup commands
