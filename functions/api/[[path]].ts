@@ -69,6 +69,18 @@ export const onRequest = async ({ request, env }: Context): Promise<Response> =>
   const url = new URL(request.url);
   const path = url.pathname;
 
+  // Enforce same-origin writes for custom endpoints that use cookie sessions.
+  // Better Auth's own auth endpoints separately validate trusted origins.
+  if (
+    !path.startsWith('/api/auth/') &&
+    ['POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method)
+  ) {
+    const origin = request.headers.get('origin');
+    if (!env.APP_ORIGIN || origin !== env.APP_ORIGIN) {
+      return reply({ error: 'Cross-origin request blocked.' }, 403);
+    }
+  }
+
   try {
     if (path.startsWith('/api/auth/')) return getAuth(env).handler(request);
 
