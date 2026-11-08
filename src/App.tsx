@@ -708,6 +708,7 @@ export default function App() {
                 <p className="section-eyebrow">YOUR DEANMUSIC ACCOUNT</p>
                 <h1>Profile</h1>
                 {user ? (
+                  <>
                   <div className="profile-card">
                     <div className="profile-avatar-large">{user.name.slice(0, 1).toUpperCase()}</div>
                     <div><h2>{user.name}</h2><p>{user.email}</p><span>DeanMusic member</span></div>
@@ -738,6 +739,7 @@ export default function App() {
                       </button>
                     </form>
                   )}
+                  </>
                 ) : (
                   <div className="empty-state"><Icon name="user" size={34} /><strong>Sign in to your account</strong><p>Your saved music and playlists will be available here.</p><button className="primary-button" onClick={() => { setAuthMode('signin'); setAuthOpen(true); }}>Sign In</button></div>
                 )}
