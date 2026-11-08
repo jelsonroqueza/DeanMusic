@@ -775,8 +775,9 @@ export const onRequest = async ({ request, env }: Context): Promise<Response> =>
     if (path === '/api/admin/tracks' && request.method === 'GET') {
       const admin = await getAdmin(request, env);
       if (!admin) return reply({ error: 'Admin access required.' }, 403);
+      await ensureMediaSchema(env);
       const result = await env.DB.prepare(
-        'SELECT t.id, t.album_id, t.title, t.duration_seconds, t.track_number, t.genre, t.audio_path, t.is_published, t.plays_count, ar.name AS artist_name, al.title AS album_title FROM tracks t INNER JOIN artists ar ON ar.id = t.artist_id LEFT JOIN albums al ON al.id = t.album_id ORDER BY t.created_at DESC LIMIT 500'
+        'SELECT t.id, t.album_id, t.title, t.duration_seconds, t.track_number, t.genre, t.audio_path, t.video_path, t.is_published, t.plays_count, ar.name AS artist_name, al.title AS album_title FROM tracks t INNER JOIN artists ar ON ar.id = t.artist_id LEFT JOIN albums al ON al.id = t.album_id ORDER BY t.created_at DESC LIMIT 500'
       ).all();
       return reply({ tracks: result.results });
     }
@@ -802,8 +803,7 @@ export const onRequest = async ({ request, env }: Context): Promise<Response> =>
       if (!album) return reply({ error: 'Album not found.' }, 404);
       if (audioPath.startsWith('/media/')) {
         const mediaId = audioPath.slice('/media/'.length);
-        const mediaExists = await env.MEDIA.get('media/' + mediaId, 'arrayBuffer');
-        if (!mediaExists) return reply({ error: 'Uploaded audio file not found in media storage.' }, 400);
+        if (!(await hasMediaObject(env, mediaId))) return reply({ error: 'Uploaded audio file not found in media storage.' }, 400);
       }
       const id = crypto.randomUUID();
       await env.DB.prepare(
@@ -816,7 +816,8 @@ export const onRequest = async ({ request, env }: Context): Promise<Response> =>
     if (adminTrack && request.method === 'PATCH') {
       const admin = await getAdmin(request, env);
       if (!admin) return reply({ error: 'Admin access required.' }, 403);
-      const body = await bodyJson<{ title?: unknown; genre?: unknown; duration?: unknown; trackNumber?: unknown }>(request);
+      await ensureMediaSchema(env);
+      const body = await bodyJson<{ title?: unknown; genre?: unknown; duration?: unknown; trackNumber?: unknown; videoPath?: unknown }>(request);
       const title = safeText(body?.title, 120);
       const genre = safeText(body?.genre, 60);
       const duration = Number(body?.duration);
@@ -824,22 +825,44 @@ export const onRequest = async ({ request, env }: Context): Promise<Response> =>
       if (!title || !Number.isFinite(duration) || duration < 0 || duration > 86400 || !Number.isInteger(trackNumber) || trackNumber < 1) {
         return reply({ error: 'Check the track title, duration, and track number.' }, 400);
       }
-      const result = await env.DB.prepare(
+      const existing = await env.DB.prepare('SELECT video_path FROM tracks WHERE id = ?')
+        .bind(adminTrack[1]).first<{ video_path: string | null }>();
+      if (!existing) return reply({ error: 'Track not found.' }, 404);
+
+      let newVideoPath: string | null | undefined;
+      if (body && Object.prototype.hasOwnProperty.call(body, 'videoPath')) {
+        if (body.videoPath === null || body.videoPath === '') {
+          newVideoPath = null;
+        } else if (typeof body.videoPath === 'string' && /^\/media\/[a-f0-9-]{36}$/i.test(body.videoPath)) {
+          const videoId = body.videoPath.slice('/media/'.length);
+          if (!(await hasMediaObject(env, videoId))) return reply({ error: 'Uploaded video file not found in media storage.' }, 400);
+          newVideoPath = body.videoPath;
+        } else {
+          return reply({ error: 'Invalid video media path.' }, 400);
+        }
+      }
+
+      await env.DB.prepare(
         'UPDATE tracks SET title = ?, genre = ?, duration_seconds = ?, track_number = ?, updated_at = datetime(\'now\') WHERE id = ?'
       ).bind(title, genre || null, Math.floor(duration), trackNumber, adminTrack[1]).run();
-      if (!result.meta.changes) return reply({ error: 'Track not found.' }, 404);
+
+      if (newVideoPath !== undefined && newVideoPath !== existing.video_path) {
+        await env.DB.prepare('UPDATE tracks SET video_path = ? WHERE id = ?').bind(newVideoPath, adminTrack[1]).run();
+        if (existing.video_path) await deleteMediaPath(env, existing.video_path);
+      }
       return reply({ updated: true });
     }
 
     if (adminTrack && request.method === 'DELETE') {
       const admin = await getAdmin(request, env);
       if (!admin) return reply({ error: 'Admin access required.' }, 403);
-      const track = await env.DB.prepare('SELECT audio_path FROM tracks WHERE id = ?').bind(adminTrack[1]).first<{ audio_path: string | null }>();
+      await ensureMediaSchema(env);
+      const track = await env.DB.prepare('SELECT audio_path, video_path FROM tracks WHERE id = ?')
+        .bind(adminTrack[1]).first<{ audio_path: string | null; video_path: string | null }>();
       if (!track) return reply({ error: 'Track not found.' }, 404);
+      if (track.audio_path) await deleteMediaPath(env, track.audio_path);
+      if (track.video_path) await deleteMediaPath(env, track.video_path);
       await env.DB.prepare('DELETE FROM tracks WHERE id = ?').bind(adminTrack[1]).run();
-      if (track.audio_path?.startsWith('/media/')) {
-        await env.MEDIA.delete('media/' + track.audio_path.slice('/media/'.length));
-      }
       return reply({ deleted: true });
     }
 
