@@ -157,6 +157,9 @@ export default function App() {
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
   const [user, setUser] = useState<User | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [adminBootstrapToken, setAdminBootstrapToken] = useState('');
+  const [adminBootstrapError, setAdminBootstrapError] = useState('');
+  const [adminBootstrapBusy, setAdminBootstrapBusy] = useState(false);
   const [authOpen, setAuthOpen] = useState(false);
   const [authMode, setAuthMode] = useState<'signin' | 'signup'>('signin');
   const [name, setName] = useState('');
@@ -361,6 +364,26 @@ export default function App() {
     } catch (error) {
       setLiked((current) => wasLiked ? [...current, id] : current.filter((item) => item !== id));
       notify(error instanceof Error ? error.message : 'Could not update likes.');
+    }
+  };
+
+  const submitAdminBootstrap = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setAdminBootstrapBusy(true);
+    setAdminBootstrapError('');
+    try {
+      const result = await api<{ isAdmin: boolean }>('/api/admin/bootstrap', {
+        method: 'POST',
+        body: JSON.stringify({ token: adminBootstrapToken }),
+      });
+      setIsAdmin(Boolean(result.isAdmin));
+      setAdminBootstrapToken('');
+      notify('Admin access activated for this account.');
+      openPage('admin');
+    } catch (error) {
+      setAdminBootstrapError(error instanceof Error ? error.message : 'Could not activate Admin access.');
+    } finally {
+      setAdminBootstrapBusy(false);
     }
   };
 
@@ -688,6 +711,31 @@ export default function App() {
                     <div><h2>{user.name}</h2><p>{user.email}</p><span>DeanMusic member</span></div>
                     <button className="outline-button" onClick={() => void signOut()}><Icon name="logout" size={17} /> Sign Out</button>
                   </div>
+                  {user.email.trim().toLowerCase() === 'jelsonroqueza@gmail.com' && !isAdmin && (
+                    <form className="admin-bootstrap-panel" onSubmit={submitAdminBootstrap}>
+                      <div>
+                        <p className="section-eyebrow">OWNER ACTIVATION</p>
+                        <h2>Activate Admin Centre</h2>
+                        <p>Enter your one-time private activation code. This code can only activate the first administrator and cannot be reused.</p>
+                      </div>
+                      <label>One-time activation code
+                        <input
+                          type="password"
+                          value={adminBootstrapToken}
+                          onChange={(event) => setAdminBootstrapToken(event.target.value)}
+                          minLength={32}
+                          maxLength={128}
+                          autoComplete="off"
+                          spellCheck={false}
+                          required
+                        />
+                      </label>
+                      {adminBootstrapError && <p className="form-error" role="alert">{adminBootstrapError}</p>}
+                      <button type="submit" className="primary-button" disabled={adminBootstrapBusy || adminBootstrapToken.trim().length < 32}>
+                        {adminBootstrapBusy ? 'Activating…' : 'Activate Admin Access'}
+                      </button>
+                    </form>
+                  )}
                 ) : (
                   <div className="empty-state"><Icon name="user" size={34} /><strong>Sign in to your account</strong><p>Your saved music and playlists will be available here.</p><button className="primary-button" onClick={() => { setAuthMode('signin'); setAuthOpen(true); }}>Sign In</button></div>
                 )}
