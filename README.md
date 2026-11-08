@@ -27,6 +27,10 @@ Cloudflare R2 and Supabase are intentionally excluded from the strict zero-cost 
 
 The first beta is a foundation, not a full Spotify replacement. Track uploads, a complete licensed audio catalog, admin music management, playlist editing/reordering, artist and album pages, and email verification are later milestones.
 
+## Admin Centre preview
+
+The Admin Centre is available to the server-authorized account listed by `ADMIN_EMAILS` in `wrangler.toml`. It supports album and artist metadata, cover art uploads, album publishing, track uploads, track detail editing, track deletion, and browser playback of uploaded audio. The current free-tier upload limits are 20 MB per audio file and 2 MB per cover image. Uploaded media is served from the existing Cloudflare Workers KV binding; keep original master files in private Google Drive as a separate archive until an automatic Drive backup integration is implemented.
+
 ## Strict cost and safety rules
 
 - Use free tiers only. Never enable a paid plan, metered add-on, paid Workers plan, or billing-dependent storage without Dean's explicit approval.
