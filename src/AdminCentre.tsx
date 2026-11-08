@@ -45,9 +45,9 @@ const previewAlbums: Album[] = [
 ];
 
 const previewTracks: Track[] = [
-  { id: 'preview-track-1', album_id: 'preview-album-1', title: 'Bituin sa Dilim', duration_seconds: 214, track_number: 1, genre: 'OPM', audio_path: null, is_published: 1, plays_count: 1240, artist_name: 'DeanMusic Originals', album_title: 'Gabi at Umaga' },
-  { id: 'preview-track-2', album_id: 'preview-album-1', title: 'Sa Dulo ng Gabi', duration_seconds: 198, track_number: 2, genre: 'OPM', audio_path: null, is_published: 1, plays_count: 865, artist_name: 'DeanMusic Originals', album_title: 'Gabi at Umaga' },
-  { id: 'preview-track-3', album_id: 'preview-album-2', title: 'Neon Highway', duration_seconds: 232, track_number: 1, genre: 'Electronic', audio_path: null, is_published: 0, plays_count: 0, artist_name: 'DeanMusic Originals', album_title: 'Midnight Drive' },
+  { id: 'preview-track-1', album_id: 'preview-album-1', title: 'Bituin sa Dilim', duration_seconds: 214, track_number: 1, genre: 'OPM', audio_path: null, video_path: null, is_published: 1, plays_count: 1240, artist_name: 'DeanMusic Originals', album_title: 'Gabi at Umaga' },
+  { id: 'preview-track-2', album_id: 'preview-album-1', title: 'Sa Dulo ng Gabi', duration_seconds: 198, track_number: 2, genre: 'OPM', audio_path: null, video_path: null, is_published: 1, plays_count: 865, artist_name: 'DeanMusic Originals', album_title: 'Gabi at Umaga' },
+  { id: 'preview-track-3', album_id: 'preview-album-2', title: 'Neon Highway', duration_seconds: 232, track_number: 1, genre: 'Electronic', audio_path: null, video_path: null, is_published: 0, plays_count: 0, artist_name: 'DeanMusic Originals', album_title: 'Midnight Drive' },
 ];
 
 
@@ -585,9 +585,9 @@ export function AdminCentre({ onExit, onNotice, previewOnly = false }: { onExit:
                   <label>Duration (seconds)<input disabled={previewOnly || busy} type="number" min="0" max="86400" value={editDuration} onChange={(event) => setEditDuration(event.target.value)} required /></label>
                 </div>
                 <label>Replace Canvas video <span className="admin-field-hint">Optional · MP4 or WebM · maximum 15 seconds and 25 MB</span><input disabled={previewOnly || busy} type="file" accept="video/mp4,video/webm,.mp4,.webm" onChange={(event) => setEditVideoFile(event.target.files?.[0] ?? null)} /></label>
-                {track.video_path && <p className="admin-file-name">A Canvas video is currently attached to this track.</p>}
+                {editingTrack.video_path && <p className="admin-file-name">A Canvas video is currently attached to this track.</p>}
                 {editVideoFile && <p className="admin-file-name">New Canvas: {editVideoFile.name}</p>}
-                {track.video_path && <label className="admin-check-row"><input type="checkbox" disabled={previewOnly || busy || Boolean(editVideoFile)} checked={removeExistingVideo} onChange={(event) => setRemoveExistingVideo(event.target.checked)} /> Remove current Canvas video when saving</label>}
+                {editingTrack.video_path && <label className="admin-check-row"><input type="checkbox" disabled={previewOnly || busy || Boolean(editVideoFile)} checked={removeExistingVideo} onChange={(event) => setRemoveExistingVideo(event.target.checked)} /> Remove current Canvas video when saving</label>}
                 <button type="submit" className="admin-primary-button" disabled={previewOnly || busy}>Save track details</button>
               </form>
             )}
