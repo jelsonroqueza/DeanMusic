@@ -42,7 +42,7 @@ Never put these values in a `VITE_` variable, GitHub file, frontend code, or cha
 
 ## 4. Configure the first administrator
 
-In Pages > Settings > Variables and Secrets, add `ADMIN_EMAILS` to both Preview and Production with the exact approved administrator email address(es), separated by commas. Save and redeploy. This is a server-side variable, not a `VITE_` frontend variable. The existing `admins` D1 table remains supported for additional database-managed administrators.
+`ADMIN_EMAILS` is defined as a plain server-side variable in `wrangler.toml` for both Preview and Production. It contains the exact approved administrator email address(es), separated by commas. This is not a `VITE_` frontend variable or a secret. The existing `admins` D1 table remains supported for additional database-managed administrators.
 
 ## 5. Apply the D1 migration
 
