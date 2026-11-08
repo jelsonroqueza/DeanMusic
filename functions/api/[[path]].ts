@@ -10,6 +10,7 @@ interface Env {
   MEDIA: KVNamespace;
   BETTER_AUTH_SECRET: string;
   APP_ORIGIN: string;
+  ADMIN_EMAILS?: string;
 }
 interface Context {
   request: Request;
@@ -63,6 +64,11 @@ async function getUser(request: Request, env: Env): Promise<UserRecord | null> {
 }
 
 async function isAdmin(user: UserRecord, env: Env): Promise<boolean> {
+  const allowlist = (env.ADMIN_EMAILS ?? '')
+    .split(',')
+    .map((email) => email.trim().toLowerCase())
+    .filter(Boolean);
+  if (allowlist.includes(user.email.trim().toLowerCase())) return true;
   const record = await env.DB.prepare('SELECT user_id FROM admins WHERE user_id = ?')
     .bind(user.id).first();
   return Boolean(record);
@@ -473,6 +479,24 @@ export const onRequest = async ({ request, env }: Context): Promise<Response> =>
     }
 
     const adminTrack = path.match(/^\/api\/admin\/tracks\/([a-zA-Z0-9_-]+)$/);
+    if (adminTrack && request.method === 'PATCH') {
+      const admin = await getAdmin(request, env);
+      if (!admin) return reply({ error: 'Admin access required.' }, 403);
+      const body = await bodyJson<{ title?: unknown; genre?: unknown; duration?: unknown; trackNumber?: unknown }>(request);
+      const title = safeText(body?.title, 120);
+      const genre = safeText(body?.genre, 60);
+      const duration = Number(body?.duration);
+      const trackNumber = Number(body?.trackNumber);
+      if (!title || !Number.isFinite(duration) || duration < 0 || duration > 86400 || !Number.isInteger(trackNumber) || trackNumber < 1) {
+        return reply({ error: 'Check the track title, duration, and track number.' }, 400);
+      }
+      const result = await env.DB.prepare(
+        'UPDATE tracks SET title = ?, genre = ?, duration_seconds = ?, track_number = ?, updated_at = datetime(\'now\') WHERE id = ?'
+      ).bind(title, genre || null, Math.floor(duration), trackNumber, adminTrack[1]).run();
+      if (!result.meta.changes) return reply({ error: 'Track not found.' }, 404);
+      return reply({ updated: true });
+    }
+
     if (adminTrack && request.method === 'DELETE') {
       const admin = await getAdmin(request, env);
       if (!admin) return reply({ error: 'Admin access required.' }, 403);
