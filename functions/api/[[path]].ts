@@ -348,7 +348,49 @@ async function uploadMedia(request: Request, env: Env, admin: UserRecord): Promi
   }, 201);
 }
 async function serveMedia(request: Request, env: Env, id: string): Promise<Response> {
-  const { value, metadata } = await env.MEDIA.getWithMetadata<MediaMetadata>('media/' + id, 'arrayBuffer');
+  const key = 'media/' + id;
+  if (env.MEDIA_R2) {
+    const head = await env.MEDIA_R2.head(key);
+    if (head) {
+      const size = head.size;
+      const rangeHeader = request.headers.get('range');
+      const headers = new Headers({
+        'Content-Type': head.httpMetadata?.contentType || 'application/octet-stream',
+        'Content-Disposition': 'inline',
+        'Accept-Ranges': 'bytes',
+        'X-Content-Type-Options': 'nosniff',
+        'Cache-Control': 'public, max-age=3600, s-maxage=86400, stale-while-revalidate=604800',
+        'Access-Control-Allow-Origin': '*'
+      });
+      if (!rangeHeader) {
+        const object = await env.MEDIA_R2.get(key);
+        if (!object?.body) return reply({ error: 'Media not found.' }, 404);
+        headers.set('Content-Length', String(size));
+        return new Response(object.body, { status: 200, headers });
+      }
+      const match = rangeHeader.match(/^bytes=(\d*)-(\d*)$/);
+      if (!match) return new Response(null, { status: 416, headers: { 'Content-Range': 'bytes */' + size } });
+      let start = match[1] ? Number(match[1]) : 0;
+      let end = match[2] ? Number(match[2]) : size - 1;
+      if (!match[1] && match[2]) {
+        const suffixLength = Number(match[2]);
+        start = Math.max(0, size - suffixLength);
+        end = size - 1;
+      }
+      if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || end < start || start >= size) {
+        return new Response(null, { status: 416, headers: { 'Content-Range': 'bytes */' + size } });
+      }
+      end = Math.min(end, size - 1);
+      const length = end - start + 1;
+      const object = await env.MEDIA_R2.get(key, { range: { offset: start, length } });
+      if (!object?.body) return reply({ error: 'Media not found.' }, 404);
+      headers.set('Content-Length', String(length));
+      headers.set('Content-Range', 'bytes ' + start + '-' + end + '/' + size);
+      return new Response(object.body, { status: 206, headers });
+    }
+  }
+
+  const { value, metadata } = await env.MEDIA.getWithMetadata<MediaMetadata>(key, 'arrayBuffer');
   if (!value) return reply({ error: 'Media not found.' }, 404);
   const data = value as ArrayBuffer;
   const size = data.byteLength;
@@ -383,7 +425,6 @@ async function serveMedia(request: Request, env: Env, id: string): Promise<Respo
   headers.set('Content-Range', 'bytes ' + start + '-' + end + '/' + size);
   return new Response(chunk, { status: 206, headers });
 }
-
 export const onRequest = async ({ request, env }: Context): Promise<Response> => {
   const url = new URL(request.url);
   const path = url.pathname;
@@ -412,8 +453,9 @@ export const onRequest = async ({ request, env }: Context): Promise<Response> =>
     }
 
     if (path === '/api/catalog' && request.method === 'GET') {
+      await ensureMediaSchema(env);
       const result = await env.DB.prepare(
-        'SELECT t.id, t.title, t.duration_seconds, t.genre, t.audio_path, t.external_audio_url, t.plays_count, ar.name AS artist_name, al.title AS album_title, al.cover_url FROM tracks t INNER JOIN artists ar ON ar.id = t.artist_id LEFT JOIN albums al ON al.id = t.album_id WHERE t.is_published = 1 ORDER BY t.plays_count DESC, t.created_at DESC LIMIT 100'
+        'SELECT t.id, t.title, t.duration_seconds, t.genre, t.audio_path, t.video_path, t.external_audio_url, t.plays_count, ar.name AS artist_name, al.title AS album_title, al.cover_url FROM tracks t INNER JOIN artists ar ON ar.id = t.artist_id LEFT JOIN albums al ON al.id = t.album_id WHERE t.is_published = 1 ORDER BY t.plays_count DESC, t.created_at DESC LIMIT 100'
       ).all();
       return reply({ tracks: result.results }, 200, 'public, max-age=60, stale-while-revalidate=300');
     }
@@ -431,8 +473,9 @@ export const onRequest = async ({ request, env }: Context): Promise<Response> =>
         'SELECT al.id, al.title, al.description, al.cover_url, al.release_date, al.genre, ar.name AS artist_name FROM albums al INNER JOIN artists ar ON ar.id = al.artist_id WHERE al.id = ? AND al.is_published = 1'
       ).bind(publicAlbumMatch[1]).first();
       if (!album) return reply({ error: 'Album not found.' }, 404);
+      await ensureMediaSchema(env);
       const tracks = await env.DB.prepare(
-        'SELECT id, title, duration_seconds, track_number, genre, audio_path, external_audio_url, plays_count FROM tracks WHERE album_id = ? AND is_published = 1 ORDER BY track_number ASC, created_at ASC'
+        'SELECT id, title, duration_seconds, track_number, genre, audio_path, video_path, external_audio_url, plays_count FROM tracks WHERE album_id = ? AND is_published = 1 ORDER BY track_number ASC, created_at ASC'
       ).bind(publicAlbumMatch[1]).all();
       return reply({ album, tracks: tracks.results }, 200, 'public, max-age=60, stale-while-revalidate=300');
     }
@@ -479,8 +522,9 @@ export const onRequest = async ({ request, env }: Context): Promise<Response> =>
         'SELECT p.id, p.owner_id, p.name, p.description, p.cover_url, p.is_public, p.created_at, u.name AS owner_name FROM playlists p INNER JOIN user u ON u.id = p.owner_id WHERE p.id = ? AND (p.is_public = 1 OR p.owner_id = ?)'
       ).bind(publicOrOwnedPlaylist[1], user?.id ?? '').first();
       if (!playlist) return reply({ error: 'Playlist not found.' }, 404);
+      await ensureMediaSchema(env);
       const tracks = await env.DB.prepare(
-        'SELECT t.id, t.title, t.duration_seconds, t.genre, t.audio_path, t.external_audio_url, t.plays_count, ar.name AS artist_name, al.title AS album_title FROM playlist_tracks pt INNER JOIN tracks t ON t.id = pt.track_id INNER JOIN artists ar ON ar.id = t.artist_id LEFT JOIN albums al ON al.id = t.album_id WHERE pt.playlist_id = ? AND t.is_published = 1 ORDER BY pt.position ASC'
+        'SELECT t.id, t.title, t.duration_seconds, t.genre, t.audio_path, t.video_path, t.external_audio_url, t.plays_count, ar.name AS artist_name, al.title AS album_title FROM playlist_tracks pt INNER JOIN tracks t ON t.id = pt.track_id INNER JOIN artists ar ON ar.id = t.artist_id LEFT JOIN albums al ON al.id = t.album_id WHERE pt.playlist_id = ? AND t.is_published = 1 ORDER BY pt.position ASC'
       ).bind(publicOrOwnedPlaylist[1]).all();
       return reply({ playlist, tracks: tracks.results }, 200, playlist.is_public ? 'public, max-age=30' : 'no-store');
     }
@@ -533,8 +577,9 @@ export const onRequest = async ({ request, env }: Context): Promise<Response> =>
     if (path === '/api/liked-tracks' && request.method === 'GET') {
       const user = await getUser(request, env);
       if (!user) return reply({ error: 'Sign in required.' }, 401);
+      await ensureMediaSchema(env);
       const result = await env.DB.prepare(
-        'SELECT t.id, t.title, t.genre, t.duration_seconds, t.audio_path, ar.name AS artist_name, al.title AS album_title FROM liked_tracks l INNER JOIN tracks t ON t.id = l.track_id INNER JOIN artists ar ON ar.id = t.artist_id LEFT JOIN albums al ON al.id = t.album_id WHERE l.user_id = ? AND t.is_published = 1 ORDER BY l.liked_at DESC LIMIT 500'
+        'SELECT t.id, t.title, t.genre, t.duration_seconds, t.audio_path, t.video_path, ar.name AS artist_name, al.title AS album_title FROM liked_tracks l INNER JOIN tracks t ON t.id = l.track_id INNER JOIN artists ar ON ar.id = t.artist_id LEFT JOIN albums al ON al.id = t.album_id WHERE l.user_id = ? AND t.is_published = 1 ORDER BY l.liked_at DESC LIMIT 500'
       ).bind(user.id).all();
       return reply({ tracks: result.results });
     }
@@ -627,6 +672,32 @@ export const onRequest = async ({ request, env }: Context): Promise<Response> =>
       const admin = await getAdmin(request, env);
       if (!admin) return reply({ error: 'Admin access required.' }, 403);
       return await uploadMedia(request, env, admin);
+    }
+
+    if (path === '/api/admin/media' && request.method === 'GET') {
+      const admin = await getAdmin(request, env);
+      if (!admin) return reply({ error: 'Admin access required.' }, 403);
+      const provider: 'r2' | 'kv' = env.MEDIA_R2 ? 'r2' : 'kv';
+      const usedBytes = await mediaUsage(env, provider);
+      const limitBytes = provider === 'r2' ? R2_STORAGE_LIMIT_BYTES : KV_STORAGE_LIMIT_BYTES;
+      const warningBytes = provider === 'r2' ? R2_STORAGE_WARNING_BYTES : Math.floor(limitBytes * 0.8);
+      return reply({
+        provider: provider === 'r2' ? 'Cloudflare R2' : 'Cloudflare KV',
+        r2Connected: provider === 'r2',
+        usedBytes,
+        limitBytes,
+        warningBytes,
+        percentUsed: Math.min(100, Math.round((usedBytes / limitBytes) * 10000) / 100),
+        canUpload: usedBytes < limitBytes
+      });
+    }
+
+    const mediaDelete = path.match(/^\/api\/admin\/media\/([a-f0-9-]{36})$/i);
+    if (mediaDelete && request.method === 'DELETE') {
+      const admin = await getAdmin(request, env);
+      if (!admin) return reply({ error: 'Admin access required.' }, 403);
+      await deleteMediaPath(env, '/media/' + mediaDelete[1]);
+      return reply({ deleted: true });
     }
 
     if (path === '/api/admin/albums' && request.method === 'GET') {
