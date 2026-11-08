@@ -460,16 +460,24 @@ export function AdminCentre({ onExit, onNotice, previewOnly = false }: { onExit:
       } else if (removeExistingVideo) {
         videoPath = null;
       }
-      await adminApi('/api/admin/tracks/' + encodeURIComponent(editingTrack.id), {
-        method: 'PATCH',
-        body: JSON.stringify({
-          title: editTitle.trim(),
-          genre: editGenre.trim(),
-          trackNumber: Number(editNumber),
-          duration: Number(editDuration),
-          ...(videoPath !== undefined ? { videoPath } : {}),
-        }),
-      });
+      try {
+        await adminApi('/api/admin/tracks/' + encodeURIComponent(editingTrack.id), {
+          method: 'PATCH',
+          body: JSON.stringify({
+            title: editTitle.trim(),
+            genre: editGenre.trim(),
+            trackNumber: Number(editNumber),
+            duration: Number(editDuration),
+            ...(videoPath !== undefined ? { videoPath } : {}),
+          }),
+        });
+      } catch (cause) {
+        if (typeof videoPath === 'string') {
+          const mediaId = videoPath.slice('/media/'.length);
+          await adminApi('/api/admin/media/' + encodeURIComponent(mediaId), { method: 'DELETE' }).catch(() => undefined);
+        }
+        throw cause;
+      }
       setEditingTrack(null);
       setEditVideoFile(null);
       setRemoveExistingVideo(false);
