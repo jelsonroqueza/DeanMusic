@@ -66,7 +66,7 @@ The first beta is a foundation, not a full Spotify replacement. Track uploads, a
 npx wrangler login
 npx wrangler d1 create deanmusic-db
 # Copy the newly created DeanMusic database ID into wrangler.toml.
-npx wrangler d1 execute deanmusic-db --remote --file=cloudflare/migrations/0001_init.sql
+npx wrangler d1 migrations apply deanmusic-db --remote
 ```
 
 Run the migration only after confirming the target D1 database name and ID belong to DeanMusic. Never paste credentials or secret values into commits, issues, prompts, or public chat.
