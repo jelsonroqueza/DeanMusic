@@ -36,13 +36,12 @@ In the DeanMusic Pages project, open Settings > Variables and Secrets. Configure
 
 - `BETTER_AUTH_SECRET`: encrypted secret, at least 32 random characters. Generate a new random value and keep it private.
 - `APP_ORIGIN`: the exact origin of this Pages website, for example `https://deanmusic.pages.dev`.
-- `ADMIN_EMAILS`: plain variable containing the comma-separated email allowlist for DeanMusic administrators. The API compares the signed-in session email server-side.
 
 Never put these values in a `VITE_` variable, GitHub file, frontend code, or chat. Never share the Better Auth secret.
 
-## 4. Configure the first administrator
+## 4. Administrator provisioning
 
-`ADMIN_EMAILS` is defined as a plain server-side variable under `[env.production.vars]` in `wrangler.toml`. It contains the exact approved administrator email address(es), separated by commas. This is not a `VITE_` frontend variable or a secret. Preview builds use the production `APP_ORIGIN` only for safe session handling and set `ADMIN_ACCESS_DISABLED = "true"`, so admin endpoints remain unavailable there. Keep Preview read-only until it has separate staging D1 and media-storage bindings. The existing `admins` D1 table remains supported for additional database-managed administrators in Production.
+Admin privileges are granted only to an authenticated account whose user ID is explicitly present in the DeanMusic D1 `admins` table. Do not use an email allowlist while email verification is disabled. The secure first-admin bootstrap flow must be completed before Admin Centre is usable in Production. Preview builds set `ADMIN_ACCESS_DISABLED = "true"` and cannot use Admin Centre endpoints. Keep Preview read-only until it has separate staging D1 and media-storage bindings.
 
 ## 5. Apply the D1 migration
 
@@ -73,6 +72,6 @@ If one check fails, stop and inspect the deployment logs and D1 migration state.
 ## Current limitations
 
 - The player currently plays an original browser-generated synth demo, not a third-party recording.
-- The initial beta does not include an admin upload interface or a commercial music catalog.
+- Admin Centre is deployed, but admin access remains locked until the first administrator is securely provisioned.
 - Public launch of any uploaded music requires documented streaming/distribution rights.
 - R2 and Google Drive public streaming integration are not part of the strict $0 setup.
