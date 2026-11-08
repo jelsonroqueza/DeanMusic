@@ -461,7 +461,7 @@ export default function App() {
           />
         </form>
         <div className="top-actions">
-          <button className="icon-button notification-button" aria-label="Notifications" onClick={() => notify('You are all caught up. There are no new notifications.')}>
+          <button className="icon-button notification-button" aria-label="Notifications" onClick={() => notify('Notifications are not connected yet.')}>
             <Icon name="bell" size={24} /><span className="notification-dot" />
           </button>
           <div className="profile-wrap">
