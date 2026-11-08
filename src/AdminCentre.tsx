@@ -30,6 +30,26 @@ type Track = {
 
 type ApiResult<T> = T;
 
+const previewAlbums: Album[] = [
+  {
+    id: 'preview-album-1', title: 'Gabi at Umaga', description: 'A sample OPM collection for the Admin Centre preview.',
+    cover_url: null, release_date: '2026-11-01', genre: 'OPM', is_published: 1,
+    created_at: '2026-11-01', artist_name: 'DeanMusic Originals', track_count: 4,
+  },
+  {
+    id: 'preview-album-2', title: 'Midnight Drive', description: 'A sample electronic album shown in read-only preview mode.',
+    cover_url: null, release_date: '2026-11-06', genre: 'Electronic', is_published: 0,
+    created_at: '2026-11-06', artist_name: 'DeanMusic Originals', track_count: 3,
+  },
+];
+
+const previewTracks: Track[] = [
+  { id: 'preview-track-1', album_id: 'preview-album-1', title: 'Bituin sa Dilim', duration_seconds: 214, track_number: 1, genre: 'OPM', audio_path: null, is_published: 1, plays_count: 1240, artist_name: 'DeanMusic Originals', album_title: 'Gabi at Umaga' },
+  { id: 'preview-track-2', album_id: 'preview-album-1', title: 'Sa Dulo ng Gabi', duration_seconds: 198, track_number: 2, genre: 'OPM', audio_path: null, is_published: 1, plays_count: 865, artist_name: 'DeanMusic Originals', album_title: 'Gabi at Umaga' },
+  { id: 'preview-track-3', album_id: 'preview-album-2', title: 'Neon Highway', duration_seconds: 232, track_number: 1, genre: 'Electronic', audio_path: null, is_published: 0, plays_count: 0, artist_name: 'DeanMusic Originals', album_title: 'Midnight Drive' },
+];
+
+
 async function adminApi<T>(path: string, init?: RequestInit): Promise<ApiResult<T>> {
   const isForm = typeof FormData !== 'undefined' && init?.body instanceof FormData;
   const response = await fetch(path, {
@@ -65,7 +85,7 @@ async function uploadMedia(file: File, kind: 'audio' | 'image'): Promise<string>
   return result.url;
 }
 
-export function AdminCentre({ onExit, onNotice }: { onExit: () => void; onNotice: (message: string) => void }) {
+export function AdminCentre({ onExit, onNotice, previewOnly = false }: { onExit: () => void; onNotice: (message: string) => void; previewOnly?: boolean }) {
   const [tab, setTab] = useState<'overview' | 'albums' | 'tracks'>('overview');
   const [albums, setAlbums] = useState<Album[]>([]);
   const [tracks, setTracks] = useState<Track[]>([]);
@@ -104,6 +124,13 @@ export function AdminCentre({ onExit, onNotice }: { onExit: () => void; onNotice
 
   const loadData = async () => {
     setError('');
+    if (previewOnly) {
+      setAlbums(previewAlbums);
+      setTracks(previewTracks);
+      setSelectedAlbum((current) => current || previewAlbums[0].id);
+      setLoading(false);
+      return;
+    }
     try {
       const [albumResult, trackResult] = await Promise.all([
         adminApi<{ albums: Album[] }>('/api/admin/albums'),
@@ -119,7 +146,7 @@ export function AdminCentre({ onExit, onNotice }: { onExit: () => void; onNotice
     }
   };
 
-  useEffect(() => { void loadData(); }, []);
+  useEffect(() => { void loadData(); }, [previewOnly]);
 
   const publishedAlbums = albums.filter((album) => album.is_published === 1).length;
   const publishedTracks = tracks.filter((track) => track.is_published === 1).length;
@@ -131,6 +158,7 @@ export function AdminCentre({ onExit, onNotice }: { onExit: () => void; onNotice
 
   const submitAlbum = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (previewOnly) return;
     if (!albumTitle.trim()) return;
     setBusy(true);
     setError('');
@@ -179,6 +207,7 @@ export function AdminCentre({ onExit, onNotice }: { onExit: () => void; onNotice
 
   const submitTrack = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (previewOnly) return;
     if (!selectedAlbum || !trackTitle.trim() || !audioFile) {
       setError('Choose an album, enter a track title, and select an audio file.');
       return;
@@ -226,6 +255,7 @@ export function AdminCentre({ onExit, onNotice }: { onExit: () => void; onNotice
 
   const saveAlbumEdit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (previewOnly) return;
     if (!editingAlbum) return;
     setBusy(true);
     setError('');
@@ -253,6 +283,7 @@ export function AdminCentre({ onExit, onNotice }: { onExit: () => void; onNotice
   };
 
   const toggleAlbumPublish = async (album: Album) => {
+    if (previewOnly) return;
     setBusy(true);
     setError('');
     try {
@@ -268,6 +299,7 @@ export function AdminCentre({ onExit, onNotice }: { onExit: () => void; onNotice
   };
 
   const removeTrack = async (track: Track) => {
+    if (previewOnly) return;
     if (!window.confirm('Delete "' + track.title + '" and its uploaded audio file? This cannot be undone.')) return;
     setBusy(true);
     setError('');
@@ -292,6 +324,7 @@ export function AdminCentre({ onExit, onNotice }: { onExit: () => void; onNotice
 
   const saveTrackEdit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (previewOnly) return;
     if (!editingTrack) return;
     setBusy(true);
     setError('');
@@ -316,7 +349,7 @@ export function AdminCentre({ onExit, onNotice }: { onExit: () => void; onNotice
   };
 
   return (
-    <section className="admin-centre">
+    <section className={previewOnly ? 'admin-centre is-preview' : 'admin-centre'}>
       <div className="admin-heading">
         <div>
           <p className="admin-eyebrow">DEANMUSIC CONTROL ROOM</p>
@@ -327,6 +360,8 @@ export function AdminCentre({ onExit, onNotice }: { onExit: () => void; onNotice
       </div>
 
       {error && <div className="admin-alert" role="alert">{error}</div>}
+
+      {previewOnly && <div className="admin-preview-banner" role="status"><strong>Read-only demo preview</strong><span>Sample data only. Upload, publish, edit, and delete actions are disabled. Production admin access remains protected.</span></div>}
 
       <div className="admin-tabs" role="tablist" aria-label="Admin sections">
         <button type="button" className={tab === 'overview' ? 'active' : ''} onClick={() => setTab('overview')}>Overview</button>
@@ -368,16 +403,16 @@ export function AdminCentre({ onExit, onNotice }: { onExit: () => void; onNotice
           <article className="admin-panel admin-create-panel">
             <div className="admin-panel-heading"><div><h2>Create album</h2><p>New albums start as drafts and stay hidden until you publish them.</p></div></div>
             <form onSubmit={submitAlbum} className="admin-form">
-              <label>Album title<input value={albumTitle} onChange={(event) => setAlbumTitle(event.target.value)} maxLength={120} required placeholder="Enter album title" /></label>
+              <label>Album title<input disabled={previewOnly || busy} value={albumTitle} onChange={(event) => setAlbumTitle(event.target.value)} maxLength={120} required placeholder="Enter album title" /></label>
               <div className="admin-form-row">
-                <label>Artist name<input value={artistName} onChange={(event) => setArtistName(event.target.value)} maxLength={120} placeholder="Your artist name" /></label>
-                <label>Genre<input value={albumGenre} onChange={(event) => setAlbumGenre(event.target.value)} maxLength={60} placeholder="OPM, Pop, Acoustic…" /></label>
+                <label>Artist name<input disabled={previewOnly || busy} value={artistName} onChange={(event) => setArtistName(event.target.value)} maxLength={120} placeholder="Your artist name" /></label>
+                <label>Genre<input disabled={previewOnly || busy} value={albumGenre} onChange={(event) => setAlbumGenre(event.target.value)} maxLength={60} placeholder="OPM, Pop, Acoustic…" /></label>
               </div>
-              <label>Description<textarea value={albumDescription} onChange={(event) => setAlbumDescription(event.target.value)} maxLength={1000} rows={3} placeholder="Tell listeners about this album." /></label>
-              <label>Release date<input type="date" value={releaseDate} onChange={(event) => setReleaseDate(event.target.value)} /></label>
-              <label>Cover artwork <span className="admin-field-hint">JPG, PNG, or WebP · max 2 MB</span><input type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => setCoverFile(event.target.files?.[0] ?? null)} /></label>
+              <label>Description<textarea disabled={previewOnly || busy} value={albumDescription} onChange={(event) => setAlbumDescription(event.target.value)} maxLength={1000} rows={3} placeholder="Tell listeners about this album." /></label>
+              <label>Release date<input disabled={previewOnly || busy} type="date" value={releaseDate} onChange={(event) => setReleaseDate(event.target.value)} /></label>
+              <label>Cover artwork <span className="admin-field-hint">JPG, PNG, or WebP · max 2 MB</span><input disabled={previewOnly || busy} type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => setCoverFile(event.target.files?.[0] ?? null)} /></label>
               {coverFile && <p className="admin-file-name">Selected: {coverFile.name}</p>}
-              <button type="submit" className="admin-primary-button" disabled={busy}>{busy ? 'Saving…' : 'Create draft album'}</button>
+              <button type="submit" className="admin-primary-button" disabled={previewOnly || busy}>{busy ? 'Saving…' : 'Create draft album'}</button>
             </form>
           </article>
 
@@ -386,14 +421,14 @@ export function AdminCentre({ onExit, onNotice }: { onExit: () => void; onNotice
               <form className="admin-edit-track admin-edit-album" onSubmit={saveAlbumEdit}>
                 <div><strong>Edit album details</strong><button type="button" className="admin-text-button" onClick={() => setEditingAlbum(null)}>Cancel</button></div>
                 <div className="admin-form-row">
-                  <label>Album title<input value={editAlbumTitle} onChange={(event) => setEditAlbumTitle(event.target.value)} maxLength={120} required /></label>
-                  <label>Artist name<input value={editArtistName} onChange={(event) => setEditArtistName(event.target.value)} maxLength={120} required /></label>
-                  <label>Genre<input value={editAlbumGenre} onChange={(event) => setEditAlbumGenre(event.target.value)} maxLength={60} /></label>
-                  <label>Release date<input type="date" value={editReleaseDate} onChange={(event) => setEditReleaseDate(event.target.value)} /></label>
+                  <label>Album title<input disabled={previewOnly || busy} value={editAlbumTitle} onChange={(event) => setEditAlbumTitle(event.target.value)} maxLength={120} required /></label>
+                  <label>Artist name<input disabled={previewOnly || busy} value={editArtistName} onChange={(event) => setEditArtistName(event.target.value)} maxLength={120} required /></label>
+                  <label>Genre<input disabled={previewOnly || busy} value={editAlbumGenre} onChange={(event) => setEditAlbumGenre(event.target.value)} maxLength={60} /></label>
+                  <label>Release date<input disabled={previewOnly || busy} type="date" value={editReleaseDate} onChange={(event) => setEditReleaseDate(event.target.value)} /></label>
                 </div>
-                <label className="admin-edit-description">Description<textarea value={editAlbumDescription} onChange={(event) => setEditAlbumDescription(event.target.value)} maxLength={1000} rows={2} /></label>
-                <label className="admin-edit-description">Replace cover artwork <span className="admin-field-hint">JPG, PNG, or WebP · max 2 MB</span><input type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => setEditCoverFile(event.target.files?.[0] ?? null)} /></label>
-                <button type="submit" className="admin-primary-button" disabled={busy}>Save album details</button>
+                <label className="admin-edit-description">Description<textarea disabled={previewOnly || busy} value={editAlbumDescription} onChange={(event) => setEditAlbumDescription(event.target.value)} maxLength={1000} rows={2} /></label>
+                <label className="admin-edit-description">Replace cover artwork <span className="admin-field-hint">JPG, PNG, or WebP · max 2 MB</span><input disabled={previewOnly || busy} type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => setEditCoverFile(event.target.files?.[0] ?? null)} /></label>
+                <button type="submit" className="admin-primary-button" disabled={previewOnly || busy}>Save album details</button>
               </form>
             )}
             <div className="admin-panel-heading"><div><h2>Your albums</h2><p>{albums.length} album{albums.length === 1 ? '' : 's'} in your catalog.</p></div></div>
@@ -402,8 +437,8 @@ export function AdminCentre({ onExit, onNotice }: { onExit: () => void; onNotice
                 <div className="admin-album-cover">{album.cover_url ? <img src={album.cover_url} alt="" /> : <span>♫</span>}</div>
                 <div className="admin-album-copy"><strong>{album.title}</strong><small>{album.artist_name} · {album.track_count} tracks · {album.genre || 'Uncategorized'}</small></div>
                 <span className={album.is_published === 1 ? 'admin-pill published' : 'admin-pill draft'}>{album.is_published === 1 ? 'Published' : 'Draft'}</span>
-                <button type="button" className="admin-text-button" disabled={busy} onClick={() => beginEditAlbum(album)}>Edit</button>
-                <button type="button" className="admin-secondary-button" disabled={busy} onClick={() => void toggleAlbumPublish(album)}>{album.is_published === 1 ? 'Unpublish' : 'Publish'}</button>
+                <button type="button" className="admin-text-button" disabled={previewOnly || busy} onClick={() => beginEditAlbum(album)}>Edit</button>
+                <button type="button" className="admin-secondary-button" disabled={previewOnly || busy} onClick={() => void toggleAlbumPublish(album)}>{album.is_published === 1 ? 'Unpublish' : 'Publish'}</button>
               </article>
             )) : <div className="admin-empty">No albums yet. Create your first album using the form.</div>}
           </div>
@@ -414,16 +449,16 @@ export function AdminCentre({ onExit, onNotice }: { onExit: () => void; onNotice
             <div className="admin-panel-heading"><div><h2>Upload a track</h2><p>Add an audio file to an existing album.</p></div></div>
             {!albums.length ? <div className="admin-empty">Create an album before uploading tracks.</div> : (
               <form onSubmit={submitTrack} className="admin-form">
-                <label>Album<select value={selectedAlbum} onChange={(event) => setSelectedAlbum(event.target.value)} required>{albums.map((album) => <option key={album.id} value={album.id}>{album.title} — {album.artist_name}</option>)}</select></label>
-                <label>Track title<input value={trackTitle} onChange={(event) => setTrackTitle(event.target.value)} maxLength={120} required placeholder="Enter track title" /></label>
+                <label>Album<select disabled={previewOnly || busy} value={selectedAlbum} onChange={(event) => setSelectedAlbum(event.target.value)} required>{albums.map((album) => <option key={album.id} value={album.id}>{album.title} — {album.artist_name}</option>)}</select></label>
+                <label>Track title<input disabled={previewOnly || busy} value={trackTitle} onChange={(event) => setTrackTitle(event.target.value)} maxLength={120} required placeholder="Enter track title" /></label>
                 <div className="admin-form-row">
-                  <label>Track number<input type="number" min="1" step="1" value={trackNumber} onChange={(event) => setTrackNumber(event.target.value)} required /></label>
-                  <label>Genre<input value={trackGenre} onChange={(event) => setTrackGenre(event.target.value)} maxLength={60} placeholder="Leave blank to use album genre" /></label>
+                  <label>Track number<input disabled={previewOnly || busy} type="number" min="1" step="1" value={trackNumber} onChange={(event) => setTrackNumber(event.target.value)} required /></label>
+                  <label>Genre<input disabled={previewOnly || busy} value={trackGenre} onChange={(event) => setTrackGenre(event.target.value)} maxLength={60} placeholder="Leave blank to use album genre" /></label>
                 </div>
-                <label>Audio file <span className="admin-field-hint">MP3, M4A, AAC, OGG, WAV, or WebM · max 20 MB</span><input id="admin-audio-file" type="file" accept="audio/mpeg,audio/mp4,audio/aac,audio/ogg,audio/wav,audio/x-wav,audio/webm,.mp3,.m4a,.aac,.ogg,.wav,.webm" onChange={onAudioSelected} required /></label>
+                <label>Audio file <span className="admin-field-hint">MP3, M4A, AAC, OGG, WAV, or WebM · max 20 MB</span><input disabled={previewOnly || busy} id="admin-audio-file" type="file" accept="audio/mpeg,audio/mp4,audio/aac,audio/ogg,audio/wav,audio/x-wav,audio/webm,.mp3,.m4a,.aac,.ogg,.wav,.webm" onChange={onAudioSelected} required /></label>
                 {audioFile && <p className="admin-file-name">Selected: {audioFile.name}</p>}
-                <label>Duration in seconds <span className="admin-field-hint">Detected automatically when supported; you can adjust it.</span><input type="number" min="0" max="86400" value={trackDuration} onChange={(event) => setTrackDuration(event.target.value)} /></label>
-                <button type="submit" className="admin-primary-button" disabled={busy || !albums.length}>{busy ? 'Uploading…' : 'Upload track'}</button>
+                <label>Duration in seconds <span className="admin-field-hint">Detected automatically when supported; you can adjust it.</span><input disabled={previewOnly || busy} type="number" min="0" max="86400" value={trackDuration} onChange={(event) => setTrackDuration(event.target.value)} /></label>
+                <button type="submit" className="admin-primary-button" disabled={previewOnly || busy || !albums.length}>{busy ? 'Uploading…' : 'Upload track'}</button>
               </form>
             )}
           </article>
@@ -434,12 +469,12 @@ export function AdminCentre({ onExit, onNotice }: { onExit: () => void; onNotice
               <form className="admin-edit-track" onSubmit={saveTrackEdit}>
                 <div><strong>Edit track details</strong><button type="button" className="admin-text-button" onClick={() => setEditingTrack(null)}>Cancel</button></div>
                 <div className="admin-form-row">
-                  <label>Title<input value={editTitle} onChange={(event) => setEditTitle(event.target.value)} required maxLength={120} /></label>
-                  <label>Genre<input value={editGenre} onChange={(event) => setEditGenre(event.target.value)} maxLength={60} /></label>
-                  <label>Track number<input type="number" min="1" step="1" value={editNumber} onChange={(event) => setEditNumber(event.target.value)} required /></label>
-                  <label>Duration (seconds)<input type="number" min="0" max="86400" value={editDuration} onChange={(event) => setEditDuration(event.target.value)} required /></label>
+                  <label>Title<input disabled={previewOnly || busy} value={editTitle} onChange={(event) => setEditTitle(event.target.value)} required maxLength={120} /></label>
+                  <label>Genre<input disabled={previewOnly || busy} value={editGenre} onChange={(event) => setEditGenre(event.target.value)} maxLength={60} /></label>
+                  <label>Track number<input disabled={previewOnly || busy} type="number" min="1" step="1" value={editNumber} onChange={(event) => setEditNumber(event.target.value)} required /></label>
+                  <label>Duration (seconds)<input disabled={previewOnly || busy} type="number" min="0" max="86400" value={editDuration} onChange={(event) => setEditDuration(event.target.value)} required /></label>
                 </div>
-                <button type="submit" className="admin-primary-button" disabled={busy}>Save track details</button>
+                <button type="submit" className="admin-primary-button" disabled={previewOnly || busy}>Save track details</button>
               </form>
             )}
             {visibleTracks.length ? (
@@ -453,7 +488,7 @@ export function AdminCentre({ onExit, onNotice }: { onExit: () => void; onNotice
                       <td>{durationLabel(track.duration_seconds)}</td>
                       <td>{Number(track.plays_count || 0).toLocaleString()}</td>
                       <td><span className={track.is_published === 1 ? 'admin-pill published' : 'admin-pill draft'}>{track.is_published === 1 ? 'Public' : 'Draft'}</span></td>
-                      <td><div className="admin-row-actions"><button type="button" className="admin-text-button" onClick={() => beginEditTrack(track)}>Edit</button><button type="button" className="admin-danger-button" disabled={busy} onClick={() => void removeTrack(track)}>Delete</button></div></td>
+                      <td><div className="admin-row-actions"><button type="button" className="admin-text-button" onClick={() => beginEditTrack(track)}>Edit</button><button type="button" className="admin-danger-button" disabled={previewOnly || busy} onClick={() => void removeTrack(track)}>Delete</button></div></td>
                     </tr>
                   ))}</tbody>
                 </table>
@@ -463,7 +498,7 @@ export function AdminCentre({ onExit, onNotice }: { onExit: () => void; onNotice
         </div>
       )}
 
-      <div className="admin-footer-actions"><button type="button" className="admin-secondary-button" onClick={() => void loadData()}>Refresh catalog</button><span>Changes are saved to your DeanMusic catalog.</span></div>
+      <div className="admin-footer-actions"><button type="button" className="admin-secondary-button" disabled={previewOnly || busy} onClick={() => void loadData()}>Refresh catalog</button><span>Changes are saved to your DeanMusic catalog.</span></div>
     </section>
   );
 }
