@@ -31,9 +31,21 @@ The first beta is a foundation, not a full Spotify replacement. Track uploads, a
 
 The first valid owner activation now performs an idempotent schema recovery for the Admin Centre tables and album columns if the production D1 database missed migration `0002`. This recovery runs only after the signed-in approved owner account and one-time activation token have both been validated. The CI workflow also validates every D1 migration in order, including the Admin Centre schema.
 
-The Admin Centre is available in Production only to authenticated user IDs explicitly provisioned in the DeanMusic D1 `admins` table. Preview deployments deliberately disable admin authorization. First-admin provisioning uses a short-lived, single-use activation token bound to the approved email; an email allowlist alone is not used because email verification is disabled. It supports album and artist metadata, cover art uploads, album publishing, track uploads, track detail editing, track deletion, and browser playback of uploaded audio. The current free-tier upload limits are 20 MB per audio file and 2 MB per cover image. Uploaded media is served from the existing Cloudflare Workers KV binding; keep original master files in private Google Drive as a separate archive until an automatic Drive backup integration is implemented.
+The Admin Centre is available in Production only to authenticated user IDs explicitly provisioned in the DeanMusic D1 `admins` table. Preview deployments deliberately disable admin authorization. First-admin provisioning uses a short-lived, single-use activation token bound to the approved email; an email allowlist alone is not used because email verification is disabled. It supports album and artist metadata, cover art uploads, album publishing, sequential multi-file audio uploads, track detail editing, soundtrack deletion, and optional HD vertical 9:16 Canvas videos up to 15 seconds per track. Current file-size limits are 20 MB per audio file, 2 MB per cover image, and 25 MB per Canvas video. The API is R2-ready: it writes to the optional `MEDIA_R2` bucket when that binding exists, otherwise it safely falls back to the existing Cloudflare Workers KV namespace. The intended R2 app-level ceiling is 100 GB with an 80 GB warning, but R2 is not connected or billing-enabled until the bucket and production binding are separately provisioned. This application-level upload ceiling is not a Cloudflare billing cap; R2 operations and usage outside this app can still incur charges. Keep original master files in private Google Drive as a separate archive.
 
 For a visual-only Admin Centre walkthrough, open the Cloudflare branch Preview URL with `?admin-preview=1`. This displays sample albums/tracks; uploads, publishing, editing, and deleting are disabled, and no catalog API is called by the demo panel.
+
+## Media storage configuration
+
+The optional production R2 binding is named `MEDIA_R2`. After the dedicated bucket `deanmusic-media` has been created and billing has been explicitly approved, add this binding under `[env.production]` in `wrangler.toml`:
+
+```toml
+[[env.production.r2_buckets]]
+binding = "MEDIA_R2"
+bucket_name = "deanmusic-media"
+```
+
+Do not add this binding before the bucket exists. Preview intentionally has no production D1, KV, or R2 resources. The 100 GB upload ceiling and 80 GB warning are enforced by the DeanMusic API using its media inventory metadata; they do not cap Cloudflare charges from other sources or R2 operations.
 
 ## Strict cost and safety rules
 
