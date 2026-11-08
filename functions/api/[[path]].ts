@@ -5,9 +5,21 @@ interface MediaMetadata {
   fileName: string;
   size: number;
 }
+interface R2MediaObject {
+  size: number;
+  body?: ReadableStream<Uint8Array> | null;
+  httpMetadata?: { contentType?: string } | null;
+}
+interface R2MediaBucket {
+  put(key: string, value: ReadableStream<Uint8Array> | ArrayBuffer, options?: { httpMetadata?: { contentType?: string }; customMetadata?: Record<string, string> }): Promise<unknown>;
+  get(key: string, options?: { range?: { offset?: number; length?: number; suffix?: number } }): Promise<R2MediaObject | null>;
+  head(key: string): Promise<R2MediaObject | null>;
+  delete(key: string): Promise<void>;
+}
 interface Env {
   DB: D1Database;
   MEDIA: KVNamespace;
+  MEDIA_R2?: R2MediaBucket;
   BETTER_AUTH_SECRET: string;
   APP_ORIGIN: string;
   ADMIN_ACCESS_DISABLED?: string;
@@ -22,8 +34,13 @@ interface Context {
 type UserRecord = { id: string; name: string; email: string };
 const AUDIO_TYPES = new Set(['audio/mpeg', 'audio/mp4', 'audio/aac', 'audio/ogg', 'audio/wav', 'audio/x-wav', 'audio/webm']);
 const IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
+const VIDEO_TYPES = new Set(['video/mp4', 'video/webm']);
 const MAX_AUDIO_BYTES = 20 * 1024 * 1024;
 const MAX_IMAGE_BYTES = 2 * 1024 * 1024;
+const MAX_VIDEO_BYTES = 25 * 1024 * 1024;
+const R2_STORAGE_LIMIT_BYTES = 100_000_000_000;
+const R2_STORAGE_WARNING_BYTES = 80_000_000_000;
+const KV_STORAGE_LIMIT_BYTES = 1024 * 1024 * 1024;
 
 function getAuth(env: Env) {
   if (!env.BETTER_AUTH_SECRET || env.BETTER_AUTH_SECRET.length < 32) {
@@ -148,43 +165,252 @@ function albumIdFromPath(path: string): string | null {
   return match?.[1] ?? null;
 }
 
+
+
+async function ensureMediaSchema(env: Env): Promise<void> {
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS media_assets (
+    id TEXT PRIMARY KEY NOT NULL,
+    provider TEXT NOT NULL CHECK (provider IN ('r2', 'kv')),
+    object_key TEXT NOT NULL UNIQUE,
+    media_kind TEXT NOT NULL CHECK (media_kind IN ('audio', 'image', 'video')),
+    file_name TEXT NOT NULL,
+    content_type TEXT NOT NULL,
+    size_bytes INTEGER NOT NULL CHECK (size_bytes > 0),
+    created_by TEXT NOT NULL REFERENCES user(id) ON DELETE RESTRICT,
+    status TEXT NOT NULL DEFAULT 'ready' CHECK (status IN ('pending', 'ready')),
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )`).run();
+
+  const trackColumns = await env.DB.prepare('PRAGMA table_info(tracks)').all<{ name: string }>();
+  if (!(trackColumns.results ?? []).some((column) => column.name === 'video_path')) {
+    try {
+      await env.DB.prepare('ALTER TABLE tracks ADD COLUMN video_path TEXT').run();
+    } catch (error) {
+      const refreshed = await env.DB.prepare('PRAGMA table_info(tracks)').all<{ name: string }>();
+      if (!(refreshed.results ?? []).some((column) => column.name === 'video_path')) throw error;
+    }
+  }
+  await env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_media_assets_provider_status ON media_assets(provider, status)').run();
+}
+
+async function mediaUsage(env: Env, provider: 'r2' | 'kv'): Promise<number> {
+  await ensureMediaSchema(env);
+  const usage = await env.DB.prepare(
+    'SELECT COALESCE(SUM(size_bytes), 0) AS used_bytes FROM media_assets WHERE provider = ?'
+  ).bind(provider).first<{ used_bytes: number }>();
+  return Math.max(0, Number(usage?.used_bytes ?? 0));
+}
+
+async function hasMediaObject(env: Env, id: string): Promise<boolean> {
+  const key = 'media/' + id;
+  if (env.MEDIA_R2) {
+    const object = await env.MEDIA_R2.head(key);
+    if (object) return true;
+  }
+  const legacy = await env.MEDIA.get(key, 'arrayBuffer');
+  return Boolean(legacy);
+}
+
+async function deleteMediaPath(env: Env, mediaPath: string | null | undefined): Promise<void> {
+  if (!mediaPath || !mediaPath.startsWith('/media/')) return;
+  await ensureMediaSchema(env);
+  const id = mediaPath.slice('/media/'.length);
+  if (!/^[a-f0-9-]{36}$/i.test(id)) return;
+  const record = await env.DB.prepare(
+    'SELECT provider, object_key FROM media_assets WHERE id = ?'
+  ).bind(id).first<{ provider: 'r2' | 'kv'; object_key: string }>();
+
+  if (record?.provider === 'r2') {
+    if (!env.MEDIA_R2) throw new Error('R2 storage is not connected; the media file was kept safe.');
+    await env.MEDIA_R2.delete(record.object_key);
+  } else if (record?.provider === 'kv') {
+    await env.MEDIA.delete(record.object_key);
+  } else {
+    const key = record?.object_key ?? ('media/' + id);
+    if (env.MEDIA_R2) {
+      const exists = await env.MEDIA_R2.head(key);
+      if (exists) await env.MEDIA_R2.delete(key);
+    }
+    await env.MEDIA.delete(key);
+  }
+  await env.DB.prepare('DELETE FROM media_assets WHERE id = ?').bind(id).run();
+}
+
+async function reserveMediaAsset(
+  env: Env,
+  details: { id: string; provider: 'r2' | 'kv'; objectKey: string; kind: 'audio' | 'image' | 'video'; fileName: string; contentType: string; size: number; adminId: string },
+  limit: number
+): Promise<boolean> {
+  await ensureMediaSchema(env);
+  const result = await env.DB.prepare(
+    `INSERT INTO media_assets (id, provider, object_key, media_kind, file_name, content_type, size_bytes, created_by, status)
+     SELECT ?, ?, ?, ?, ?, ?, ?, ?, 'pending'
+     WHERE (SELECT COALESCE(SUM(size_bytes), 0) FROM media_assets WHERE provider = ?) + ? <= ?`
+  ).bind(
+    details.id, details.provider, details.objectKey, details.kind, details.fileName,
+    details.contentType, details.size, details.adminId, details.provider, details.size, limit
+  ).run();
+  return Number(result.meta.changes ?? 0) === 1;
+}
+
+
+async function tracksWithCanvas(
+  env: Env,
+  canvasSql: string,
+  legacySql: string,
+  values: unknown[] = []
+): Promise<Array<Record<string, unknown>>> {
+  try {
+    const statement = env.DB.prepare(canvasSql);
+    const result = await (values.length ? statement.bind(...values) : statement).all<Record<string, unknown>>();
+    return result.results ?? [];
+  } catch (error) {
+    // Until the first authorized Admin Centre visit provisions video_path,
+    // keep public catalog, playlists, and likes fully available without Canvas.
+    const statement = env.DB.prepare(legacySql);
+    const result = await (values.length ? statement.bind(...values) : statement).all<Record<string, unknown>>();
+    return (result.results ?? []).map((row) => ({ ...row, video_path: null }));
+  }
+}
+
 async function uploadMedia(request: Request, env: Env, admin: UserRecord): Promise<Response> {
   let form: FormData;
   try { form = await request.formData(); }
   catch { return reply({ error: 'Invalid upload form.' }, 400); }
+
   const file = form.get('file');
-  const kind = form.get('kind') === 'image' ? 'image' : 'audio';
-  if (!file || typeof file !== 'object' || !('arrayBuffer' in file) || !('size' in file) || !('type' in file)) {
+  const kindValue = form.get('kind');
+  if (kindValue !== 'audio' && kindValue !== 'image' && kindValue !== 'video') {
+    return reply({ error: 'Choose audio, image, or video media.' }, 400);
+  }
+  const kind = kindValue;
+  if (!file || typeof file !== 'object' || !('stream' in file) || !('size' in file) || !('type' in file) || !('name' in file)) {
     return reply({ error: 'Choose a valid file to upload.' }, 400);
   }
+
   const upload = file as File;
-  const allowed = kind === 'image' ? IMAGE_TYPES : AUDIO_TYPES;
-  const maxBytes = kind === 'image' ? MAX_IMAGE_BYTES : MAX_AUDIO_BYTES;
+  const allowed = kind === 'image' ? IMAGE_TYPES : kind === 'video' ? VIDEO_TYPES : AUDIO_TYPES;
+  const maxBytes = kind === 'image' ? MAX_IMAGE_BYTES : kind === 'video' ? MAX_VIDEO_BYTES : MAX_AUDIO_BYTES;
   if (!allowed.has(upload.type)) {
-    return reply({ error: kind === 'image' ? 'Use a JPG, PNG, or WebP cover image.' : 'Use an MP3, M4A, AAC, OGG, WAV, or WebM audio file.' }, 415);
+    return reply({
+      error: kind === 'image'
+        ? 'Use a JPG, PNG, or WebP cover image.'
+        : kind === 'video'
+          ? 'Use an MP4 or WebM video.'
+          : 'Use an MP3, M4A, AAC, OGG, WAV, or WebM audio file.'
+    }, 415);
   }
   if (upload.size <= 0 || upload.size > maxBytes) {
-    return reply({ error: kind === 'image' ? 'Cover images must be 2 MB or smaller.' : 'Audio files must be 20 MB or smaller on the free storage tier.' }, 413);
+    return reply({
+      error: kind === 'image'
+        ? 'Cover images must be 2 MB or smaller.'
+        : kind === 'video'
+          ? 'Music videos must be 25 MB or smaller.'
+          : 'Audio files must be 20 MB or smaller.'
+    }, 413);
   }
+  if (kind === 'video') {
+    const seconds = Number(form.get('durationSeconds'));
+    if (!Number.isFinite(seconds) || seconds <= 0 || seconds > 15.05) {
+      return reply({ error: 'Canvas videos must be 15 seconds or shorter. Check the selected video duration.' }, 400);
+    }
+  }
+
+  const provider: 'r2' | 'kv' = env.MEDIA_R2 ? 'r2' : 'kv';
+  const limit = provider === 'r2' ? R2_STORAGE_LIMIT_BYTES : KV_STORAGE_LIMIT_BYTES;
   const id = crypto.randomUUID();
   const key = 'media/' + id;
-  const metadata: MediaMetadata = {
-    contentType: upload.type,
-    fileName: safeText(upload.name, 120) || (kind === 'image' ? 'cover' : 'audio'),
-    size: upload.size
-  };
-  await env.MEDIA.put(key, await upload.arrayBuffer(), { metadata });
+  const fileName = safeText(upload.name, 120) || (kind === 'image' ? 'cover' : kind === 'video' ? 'canvas' : 'audio');
+  const reserved = await reserveMediaAsset(env, {
+    id, provider, objectKey: key, kind, fileName, contentType: upload.type, size: upload.size, adminId: admin.id
+  }, limit);
+
+  if (!reserved) {
+    const usedBytes = await mediaUsage(env, provider);
+    return reply({
+      error: provider === 'r2'
+        ? 'The DeanMusic 100 GB storage ceiling has been reached. Delete media or approve a higher limit before uploading more.'
+        : 'The DeanMusic free storage ceiling has been reached. Connect the approved R2 bucket before adding more media.',
+      storageProvider: provider === 'r2' ? 'Cloudflare R2' : 'Cloudflare KV',
+      usedBytes,
+      limitBytes: limit
+    }, 507);
+  }
+
+  try {
+    if (provider === 'r2' && env.MEDIA_R2) {
+      await env.MEDIA_R2.put(key, upload.stream(), {
+        httpMetadata: { contentType: upload.type },
+        customMetadata: { mediaId: id, kind, fileName, uploadedBy: admin.id }
+      });
+    } else {
+      await env.MEDIA.put(key, await upload.arrayBuffer(), {
+        metadata: { contentType: upload.type, fileName, size: upload.size } satisfies MediaMetadata
+      });
+    }
+    await env.DB.prepare("UPDATE media_assets SET status = 'ready' WHERE id = ?").bind(id).run();
+  } catch (error) {
+    await env.DB.prepare('DELETE FROM media_assets WHERE id = ?').bind(id).run();
+    throw error;
+  }
+
+  const usedBytes = await mediaUsage(env, provider);
   return reply({
     mediaId: id,
     url: '/media/' + id,
     kind,
     size: upload.size,
+    storageProvider: provider === 'r2' ? 'Cloudflare R2' : 'Cloudflare KV',
+    usedBytes,
+    limitBytes: limit,
+    warningBytes: provider === 'r2' ? R2_STORAGE_WARNING_BYTES : Math.floor(limit * 0.8),
     uploadedBy: admin.name
   }, 201);
 }
-
 async function serveMedia(request: Request, env: Env, id: string): Promise<Response> {
-  const { value, metadata } = await env.MEDIA.getWithMetadata<MediaMetadata>('media/' + id, 'arrayBuffer');
+  const key = 'media/' + id;
+  if (env.MEDIA_R2) {
+    const head = await env.MEDIA_R2.head(key);
+    if (head) {
+      const size = head.size;
+      const rangeHeader = request.headers.get('range');
+      const headers = new Headers({
+        'Content-Type': head.httpMetadata?.contentType || 'application/octet-stream',
+        'Content-Disposition': 'inline',
+        'Accept-Ranges': 'bytes',
+        'X-Content-Type-Options': 'nosniff',
+        'Cache-Control': 'public, max-age=3600, s-maxage=86400, stale-while-revalidate=604800',
+        'Access-Control-Allow-Origin': '*'
+      });
+      if (!rangeHeader) {
+        const object = await env.MEDIA_R2.get(key);
+        if (!object?.body) return reply({ error: 'Media not found.' }, 404);
+        headers.set('Content-Length', String(size));
+        return new Response(object.body, { status: 200, headers });
+      }
+      const match = rangeHeader.match(/^bytes=(\d*)-(\d*)$/);
+      if (!match) return new Response(null, { status: 416, headers: { 'Content-Range': 'bytes */' + size } });
+      let start = match[1] ? Number(match[1]) : 0;
+      let end = match[2] ? Number(match[2]) : size - 1;
+      if (!match[1] && match[2]) {
+        const suffixLength = Number(match[2]);
+        start = Math.max(0, size - suffixLength);
+        end = size - 1;
+      }
+      if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || end < start || start >= size) {
+        return new Response(null, { status: 416, headers: { 'Content-Range': 'bytes */' + size } });
+      }
+      end = Math.min(end, size - 1);
+      const length = end - start + 1;
+      const object = await env.MEDIA_R2.get(key, { range: { offset: start, length } });
+      if (!object?.body) return reply({ error: 'Media not found.' }, 404);
+      headers.set('Content-Length', String(length));
+      headers.set('Content-Range', 'bytes ' + start + '-' + end + '/' + size);
+      return new Response(object.body, { status: 206, headers });
+    }
+  }
+
+  const { value, metadata } = await env.MEDIA.getWithMetadata<MediaMetadata>(key, 'arrayBuffer');
   if (!value) return reply({ error: 'Media not found.' }, 404);
   const data = value as ArrayBuffer;
   const size = data.byteLength;
@@ -219,7 +445,6 @@ async function serveMedia(request: Request, env: Env, id: string): Promise<Respo
   headers.set('Content-Range', 'bytes ' + start + '-' + end + '/' + size);
   return new Response(chunk, { status: 206, headers });
 }
-
 export const onRequest = async ({ request, env }: Context): Promise<Response> => {
   const url = new URL(request.url);
   const path = url.pathname;
@@ -244,14 +469,16 @@ export const onRequest = async ({ request, env }: Context): Promise<Response> =>
 
     if (path === '/api/health' && request.method === 'GET') {
       await env.DB.prepare('SELECT 1 AS ok').first();
-      return reply({ ok: true, service: 'DeanMusic API', database: 'Cloudflare D1', media: 'Cloudflare Workers KV' });
+      return reply({ ok: true, service: 'DeanMusic API', database: 'Cloudflare D1', media: env.MEDIA_R2 ? 'Cloudflare R2' : 'Cloudflare Workers KV' });
     }
 
     if (path === '/api/catalog' && request.method === 'GET') {
-      const result = await env.DB.prepare(
+      const tracks = await tracksWithCanvas(
+        env,
+        'SELECT t.id, t.title, t.duration_seconds, t.genre, t.audio_path, t.video_path, t.external_audio_url, t.plays_count, ar.name AS artist_name, al.title AS album_title, al.cover_url FROM tracks t INNER JOIN artists ar ON ar.id = t.artist_id LEFT JOIN albums al ON al.id = t.album_id WHERE t.is_published = 1 ORDER BY t.plays_count DESC, t.created_at DESC LIMIT 100',
         'SELECT t.id, t.title, t.duration_seconds, t.genre, t.audio_path, t.external_audio_url, t.plays_count, ar.name AS artist_name, al.title AS album_title, al.cover_url FROM tracks t INNER JOIN artists ar ON ar.id = t.artist_id LEFT JOIN albums al ON al.id = t.album_id WHERE t.is_published = 1 ORDER BY t.plays_count DESC, t.created_at DESC LIMIT 100'
-      ).all();
-      return reply({ tracks: result.results }, 200, 'public, max-age=60, stale-while-revalidate=300');
+      );
+      return reply({ tracks }, 200, 'public, max-age=60, stale-while-revalidate=300');
     }
 
     if (path === '/api/albums' && request.method === 'GET') {
@@ -267,10 +494,13 @@ export const onRequest = async ({ request, env }: Context): Promise<Response> =>
         'SELECT al.id, al.title, al.description, al.cover_url, al.release_date, al.genre, ar.name AS artist_name FROM albums al INNER JOIN artists ar ON ar.id = al.artist_id WHERE al.id = ? AND al.is_published = 1'
       ).bind(publicAlbumMatch[1]).first();
       if (!album) return reply({ error: 'Album not found.' }, 404);
-      const tracks = await env.DB.prepare(
-        'SELECT id, title, duration_seconds, track_number, genre, audio_path, external_audio_url, plays_count FROM tracks WHERE album_id = ? AND is_published = 1 ORDER BY track_number ASC, created_at ASC'
-      ).bind(publicAlbumMatch[1]).all();
-      return reply({ album, tracks: tracks.results }, 200, 'public, max-age=60, stale-while-revalidate=300');
+      const tracks = await tracksWithCanvas(
+        env,
+        'SELECT id, title, duration_seconds, track_number, genre, audio_path, video_path, external_audio_url, plays_count FROM tracks WHERE album_id = ? AND is_published = 1 ORDER BY track_number ASC, created_at ASC',
+        'SELECT id, title, duration_seconds, track_number, genre, audio_path, external_audio_url, plays_count FROM tracks WHERE album_id = ? AND is_published = 1 ORDER BY track_number ASC, created_at ASC',
+        [publicAlbumMatch[1]]
+      );
+      return reply({ album, tracks }, 200, 'public, max-age=60, stale-while-revalidate=300');
     }
 
     if (path === '/api/public-playlists' && request.method === 'GET') {
@@ -315,10 +545,13 @@ export const onRequest = async ({ request, env }: Context): Promise<Response> =>
         'SELECT p.id, p.owner_id, p.name, p.description, p.cover_url, p.is_public, p.created_at, u.name AS owner_name FROM playlists p INNER JOIN user u ON u.id = p.owner_id WHERE p.id = ? AND (p.is_public = 1 OR p.owner_id = ?)'
       ).bind(publicOrOwnedPlaylist[1], user?.id ?? '').first();
       if (!playlist) return reply({ error: 'Playlist not found.' }, 404);
-      const tracks = await env.DB.prepare(
-        'SELECT t.id, t.title, t.duration_seconds, t.genre, t.audio_path, t.external_audio_url, t.plays_count, ar.name AS artist_name, al.title AS album_title FROM playlist_tracks pt INNER JOIN tracks t ON t.id = pt.track_id INNER JOIN artists ar ON ar.id = t.artist_id LEFT JOIN albums al ON al.id = t.album_id WHERE pt.playlist_id = ? AND t.is_published = 1 ORDER BY pt.position ASC'
-      ).bind(publicOrOwnedPlaylist[1]).all();
-      return reply({ playlist, tracks: tracks.results }, 200, playlist.is_public ? 'public, max-age=30' : 'no-store');
+      const tracks = await tracksWithCanvas(
+        env,
+        'SELECT t.id, t.title, t.duration_seconds, t.genre, t.audio_path, t.video_path, t.external_audio_url, t.plays_count, ar.name AS artist_name, al.title AS album_title FROM playlist_tracks pt INNER JOIN tracks t ON t.id = pt.track_id INNER JOIN artists ar ON ar.id = t.artist_id LEFT JOIN albums al ON al.id = t.album_id WHERE pt.playlist_id = ? AND t.is_published = 1 ORDER BY pt.position ASC',
+        'SELECT t.id, t.title, t.duration_seconds, t.genre, t.audio_path, t.external_audio_url, t.plays_count, ar.name AS artist_name, al.title AS album_title FROM playlist_tracks pt INNER JOIN tracks t ON t.id = pt.track_id INNER JOIN artists ar ON ar.id = t.artist_id LEFT JOIN albums al ON al.id = t.album_id WHERE pt.playlist_id = ? AND t.is_published = 1 ORDER BY pt.position ASC',
+        [publicOrOwnedPlaylist[1]]
+      );
+      return reply({ playlist, tracks }, 200, playlist.is_public ? 'public, max-age=30' : 'no-store');
     }
 
     const playlistDelete = path.match(/^\/api\/playlists\/([a-zA-Z0-9_-]+)$/);
@@ -369,10 +602,13 @@ export const onRequest = async ({ request, env }: Context): Promise<Response> =>
     if (path === '/api/liked-tracks' && request.method === 'GET') {
       const user = await getUser(request, env);
       if (!user) return reply({ error: 'Sign in required.' }, 401);
-      const result = await env.DB.prepare(
-        'SELECT t.id, t.title, t.genre, t.duration_seconds, t.audio_path, ar.name AS artist_name, al.title AS album_title FROM liked_tracks l INNER JOIN tracks t ON t.id = l.track_id INNER JOIN artists ar ON ar.id = t.artist_id LEFT JOIN albums al ON al.id = t.album_id WHERE l.user_id = ? AND t.is_published = 1 ORDER BY l.liked_at DESC LIMIT 500'
-      ).bind(user.id).all();
-      return reply({ tracks: result.results });
+      const tracks = await tracksWithCanvas(
+        env,
+        'SELECT t.id, t.title, t.genre, t.duration_seconds, t.audio_path, t.video_path, ar.name AS artist_name, al.title AS album_title FROM liked_tracks l INNER JOIN tracks t ON t.id = l.track_id INNER JOIN artists ar ON ar.id = t.artist_id LEFT JOIN albums al ON al.id = t.album_id WHERE l.user_id = ? AND t.is_published = 1 ORDER BY l.liked_at DESC LIMIT 500',
+        'SELECT t.id, t.title, t.genre, t.duration_seconds, t.audio_path, ar.name AS artist_name, al.title AS album_title FROM liked_tracks l INNER JOIN tracks t ON t.id = l.track_id INNER JOIN artists ar ON ar.id = t.artist_id LEFT JOIN albums al ON al.id = t.album_id WHERE l.user_id = ? AND t.is_published = 1 ORDER BY l.liked_at DESC LIMIT 500',
+        [user.id]
+      );
+      return reply({ tracks });
     }
 
     const likeRoute = path.match(/^\/api\/likes\/([a-zA-Z0-9_-]+)$/);
@@ -465,6 +701,32 @@ export const onRequest = async ({ request, env }: Context): Promise<Response> =>
       return await uploadMedia(request, env, admin);
     }
 
+    if (path === '/api/admin/media' && request.method === 'GET') {
+      const admin = await getAdmin(request, env);
+      if (!admin) return reply({ error: 'Admin access required.' }, 403);
+      const provider: 'r2' | 'kv' = env.MEDIA_R2 ? 'r2' : 'kv';
+      const usedBytes = await mediaUsage(env, provider);
+      const limitBytes = provider === 'r2' ? R2_STORAGE_LIMIT_BYTES : KV_STORAGE_LIMIT_BYTES;
+      const warningBytes = provider === 'r2' ? R2_STORAGE_WARNING_BYTES : Math.floor(limitBytes * 0.8);
+      return reply({
+        provider: provider === 'r2' ? 'Cloudflare R2' : 'Cloudflare KV',
+        r2Connected: provider === 'r2',
+        usedBytes,
+        limitBytes,
+        warningBytes,
+        percentUsed: Math.min(100, Math.round((usedBytes / limitBytes) * 10000) / 100),
+        canUpload: usedBytes < limitBytes
+      });
+    }
+
+    const mediaDelete = path.match(/^\/api\/admin\/media\/([a-f0-9-]{36})$/i);
+    if (mediaDelete && request.method === 'DELETE') {
+      const admin = await getAdmin(request, env);
+      if (!admin) return reply({ error: 'Admin access required.' }, 403);
+      await deleteMediaPath(env, '/media/' + mediaDelete[1]);
+      return reply({ deleted: true });
+    }
+
     if (path === '/api/admin/albums' && request.method === 'GET') {
       const admin = await getAdmin(request, env);
       if (!admin) return reply({ error: 'Admin access required.' }, 403);
@@ -540,8 +802,9 @@ export const onRequest = async ({ request, env }: Context): Promise<Response> =>
     if (path === '/api/admin/tracks' && request.method === 'GET') {
       const admin = await getAdmin(request, env);
       if (!admin) return reply({ error: 'Admin access required.' }, 403);
+      await ensureMediaSchema(env);
       const result = await env.DB.prepare(
-        'SELECT t.id, t.album_id, t.title, t.duration_seconds, t.track_number, t.genre, t.audio_path, t.is_published, t.plays_count, ar.name AS artist_name, al.title AS album_title FROM tracks t INNER JOIN artists ar ON ar.id = t.artist_id LEFT JOIN albums al ON al.id = t.album_id ORDER BY t.created_at DESC LIMIT 500'
+        'SELECT t.id, t.album_id, t.title, t.duration_seconds, t.track_number, t.genre, t.audio_path, t.video_path, t.is_published, t.plays_count, ar.name AS artist_name, al.title AS album_title FROM tracks t INNER JOIN artists ar ON ar.id = t.artist_id LEFT JOIN albums al ON al.id = t.album_id ORDER BY t.created_at DESC LIMIT 500'
       ).all();
       return reply({ tracks: result.results });
     }
@@ -567,8 +830,7 @@ export const onRequest = async ({ request, env }: Context): Promise<Response> =>
       if (!album) return reply({ error: 'Album not found.' }, 404);
       if (audioPath.startsWith('/media/')) {
         const mediaId = audioPath.slice('/media/'.length);
-        const mediaExists = await env.MEDIA.get('media/' + mediaId, 'arrayBuffer');
-        if (!mediaExists) return reply({ error: 'Uploaded audio file not found in media storage.' }, 400);
+        if (!(await hasMediaObject(env, mediaId))) return reply({ error: 'Uploaded audio file not found in media storage.' }, 400);
       }
       const id = crypto.randomUUID();
       await env.DB.prepare(
@@ -581,7 +843,8 @@ export const onRequest = async ({ request, env }: Context): Promise<Response> =>
     if (adminTrack && request.method === 'PATCH') {
       const admin = await getAdmin(request, env);
       if (!admin) return reply({ error: 'Admin access required.' }, 403);
-      const body = await bodyJson<{ title?: unknown; genre?: unknown; duration?: unknown; trackNumber?: unknown }>(request);
+      await ensureMediaSchema(env);
+      const body = await bodyJson<{ title?: unknown; genre?: unknown; duration?: unknown; trackNumber?: unknown; videoPath?: unknown }>(request);
       const title = safeText(body?.title, 120);
       const genre = safeText(body?.genre, 60);
       const duration = Number(body?.duration);
@@ -589,22 +852,44 @@ export const onRequest = async ({ request, env }: Context): Promise<Response> =>
       if (!title || !Number.isFinite(duration) || duration < 0 || duration > 86400 || !Number.isInteger(trackNumber) || trackNumber < 1) {
         return reply({ error: 'Check the track title, duration, and track number.' }, 400);
       }
-      const result = await env.DB.prepare(
+      const existing = await env.DB.prepare('SELECT video_path FROM tracks WHERE id = ?')
+        .bind(adminTrack[1]).first<{ video_path: string | null }>();
+      if (!existing) return reply({ error: 'Track not found.' }, 404);
+
+      let newVideoPath: string | null | undefined;
+      if (body && Object.prototype.hasOwnProperty.call(body, 'videoPath')) {
+        if (body.videoPath === null || body.videoPath === '') {
+          newVideoPath = null;
+        } else if (typeof body.videoPath === 'string' && /^\/media\/[a-f0-9-]{36}$/i.test(body.videoPath)) {
+          const videoId = body.videoPath.slice('/media/'.length);
+          if (!(await hasMediaObject(env, videoId))) return reply({ error: 'Uploaded video file not found in media storage.' }, 400);
+          newVideoPath = body.videoPath;
+        } else {
+          return reply({ error: 'Invalid video media path.' }, 400);
+        }
+      }
+
+      await env.DB.prepare(
         'UPDATE tracks SET title = ?, genre = ?, duration_seconds = ?, track_number = ?, updated_at = datetime(\'now\') WHERE id = ?'
       ).bind(title, genre || null, Math.floor(duration), trackNumber, adminTrack[1]).run();
-      if (!result.meta.changes) return reply({ error: 'Track not found.' }, 404);
+
+      if (newVideoPath !== undefined && newVideoPath !== existing.video_path) {
+        await env.DB.prepare('UPDATE tracks SET video_path = ? WHERE id = ?').bind(newVideoPath, adminTrack[1]).run();
+        if (existing.video_path) await deleteMediaPath(env, existing.video_path);
+      }
       return reply({ updated: true });
     }
 
     if (adminTrack && request.method === 'DELETE') {
       const admin = await getAdmin(request, env);
       if (!admin) return reply({ error: 'Admin access required.' }, 403);
-      const track = await env.DB.prepare('SELECT audio_path FROM tracks WHERE id = ?').bind(adminTrack[1]).first<{ audio_path: string | null }>();
+      await ensureMediaSchema(env);
+      const track = await env.DB.prepare('SELECT audio_path, video_path FROM tracks WHERE id = ?')
+        .bind(adminTrack[1]).first<{ audio_path: string | null; video_path: string | null }>();
       if (!track) return reply({ error: 'Track not found.' }, 404);
+      if (track.audio_path) await deleteMediaPath(env, track.audio_path);
+      if (track.video_path) await deleteMediaPath(env, track.video_path);
       await env.DB.prepare('DELETE FROM tracks WHERE id = ?').bind(adminTrack[1]).run();
-      if (track.audio_path?.startsWith('/media/')) {
-        await env.MEDIA.delete('media/' + track.audio_path.slice('/media/'.length));
-      }
       return reply({ deleted: true });
     }
 

@@ -41,7 +41,7 @@ Never put these values in a `VITE_` variable, GitHub file, frontend code, or cha
 
 ## 4. Administrator provisioning
 
-Admin privileges are granted only to an authenticated account whose user ID is explicitly present in the DeanMusic D1 `admins` table. Do not use an email allowlist while email verification is disabled. The first administrator can be provisioned once using the short-lived activation flow in the account Profile page. The token hash, approved email, and expiry are configured only in Production variables; the plain one-time token is not stored in the repository. Production explicitly re-declares the DeanMusic D1 (`DB`) and KV (`MEDIA`) bindings because named Cloudflare environments do not inherit top-level bindings. Preview builds set `ADMIN_ACCESS_DISABLED = "true"` and intentionally have no D1 or KV bindings until separate staging resources exist; keep Preview read-only and do not point it at production data.
+Admin privileges are granted only to an authenticated account whose user ID is explicitly present in the DeanMusic D1 `admins` table. Do not use an email allowlist while email verification is disabled. The first administrator can be provisioned once using the short-lived activation flow in the account Profile page. The token hash, approved email, and expiry are configured only in Production variables; the plain one-time token is not stored in the repository. Production explicitly re-declares the DeanMusic D1 (`DB`) and KV (`MEDIA`) bindings because named Cloudflare environments do not inherit top-level bindings. Preview builds set `ADMIN_ACCESS_DISABLED = "true"` and intentionally have no D1, KV, or R2 bindings until separate staging resources exist; keep Preview read-only and do not point it at production data. The API can use an optional `MEDIA_R2` binding when a dedicated production bucket is provisioned; until then it falls back to the existing KV namespace.
 
 ## 5. Apply the D1 migrations
 
@@ -55,7 +55,21 @@ npx wrangler d1 migrations apply deanmusic-db --remote
 
 Wrangler reads all versioned SQL migrations from `cloudflare/migrations` as configured in `wrangler.toml`. Review the target database name before confirming. This applies the base schema (`0001_init.sql`) and the Admin Centre schema (`0002_public_albums_admin.sql`) in order. The first valid owner activation also has a narrowly scoped schema-recovery step if migration `0002` was missed.
 
-## 6. Verify
+## 6. Optional R2 media storage (requires separate billing approval)
+
+R2 is not enabled by this repository's current configuration. Do not create a bucket, add a payment method, or add this binding without Dean's separate approval of the paid R2 setup.
+
+After approval and creation of the dedicated Standard bucket named `deanmusic-media`, add this to the production environment section of `wrangler.toml`:
+
+```toml
+[[env.production.r2_buckets]]
+binding = "MEDIA_R2"
+bucket_name = "deanmusic-media"
+```
+
+Do not add an R2 binding under Preview. The DeanMusic API enforces an application-level 80 GB warning and 100 GB upload ceiling. That is not a Cloudflare billing cap: R2 request operations and usage outside the DeanMusic application can still incur charges. Cloudflare budget alerts are notifications and do not stop usage automatically.
+
+## 7. Verify
 
 After the next deployment, check:
 
@@ -66,6 +80,8 @@ After the next deployment, check:
 5. Like and unlike the demo track.
 6. Create a playlist.
 7. Create a second test account and confirm it cannot see the first account's private playlists or liked songs.
+8. In Admin Centre, upload one audio file and a 15-second HD 9:16 MP4/WebM Canvas video; verify it stays synchronized with playback, pauses with the song, and loops.
+9. Test a multi-file audio batch and confirm each successful track appears in the selected album.
 
 If one check fails, stop and inspect the deployment logs and D1 migration state. Do not change GENMERCH or upgrade the Cloudflare plan to work around errors.
 

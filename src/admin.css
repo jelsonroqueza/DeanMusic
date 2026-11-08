@@ -87,3 +87,22 @@
 .admin-bootstrap-panel input:focus{outline:none;border-color:#00c819;box-shadow:0 0 0 3px #00e51a18}
 .admin-bootstrap-panel .primary-button{align-self:flex-start}
 @media(max-width:700px){.admin-bootstrap-panel{padding:16px}.admin-bootstrap-panel .primary-button{width:100%}}
+
+
+/* Bulk uploads, R2 usage, and Canvas video controls */
+.admin-storage-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:14px}
+.admin-storage-heading>div{display:flex;flex-direction:column;gap:5px}
+.admin-storage-heading small{color:#9eaaa2;font-size:11px;line-height:1.5}
+.admin-storage-bar{height:9px;margin:15px 0 8px;overflow:hidden;border-radius:99px;background:#252c27}
+.admin-storage-bar span{display:block;height:100%;border-radius:inherit;background:linear-gradient(90deg,#00a918,#7cff8d);transition:width .25s ease}
+.admin-storage-summary{display:flex;align-items:center;justify-content:space-between;gap:12px;color:#b5c0b7;font-size:11px}
+.admin-storage-summary strong{color:#effff1;font-size:13px}
+.admin-selected-files{display:flex;flex-direction:column;gap:5px;padding:11px 12px;border:1px solid #303a33;border-radius:10px;background:#0d120e;color:#bdc9bf}
+.admin-selected-files strong{color:#dfffe3;font-size:12px}
+.admin-selected-files small{overflow-wrap:anywhere;color:#9eaaa2;font-size:11px}
+.admin-upload-progress{margin:2px 0 0;padding:10px 12px;border-radius:9px;background:#102315;color:#a7ffb1;font-size:12px;line-height:1.5}
+.admin-check-row{display:flex!important;flex-direction:row!important;align-items:center;gap:9px!important;margin:8px 0;color:#bdc9bf!important}
+.admin-check-row input{width:16px;height:16px;accent-color:#00e51a}
+@media(max-width:700px){.admin-storage-heading{align-items:flex-start;flex-direction:column}.admin-selected-files{max-height:180px;overflow:auto}}
+
+.admin-storage-warning{margin:10px 0!important;padding:10px 12px;border:1px solid rgba(255,185,74,.35);border-radius:9px;background:rgba(255,172,55,.08);color:#ffd28a!important;font-size:11px!important}

@@ -10,6 +10,7 @@ type Track = {
   duration: number;
   plays: number;
   audioUrl: string | null;
+  videoUrl: string | null;
 };
 type Playlist = { id: string; name: string; description: string | null; is_public: number };
 type User = { id: string; name: string; email: string };
@@ -24,6 +25,7 @@ const demoTrack: Track = {
   duration: 24,
   plays: 1280,
   audioUrl: null,
+  videoUrl: null,
 };
 
 const collections = [
@@ -68,6 +70,7 @@ function asTrack(row: Record<string, unknown>): Track {
     audioUrl: typeof row.audio_path === 'string' && row.audio_path.startsWith('/media/')
       ? row.audio_path
       : (typeof row.external_audio_url === 'string' && /^https:\/\//i.test(row.external_audio_url) ? row.external_audio_url : null),
+    videoUrl: typeof row.video_path === 'string' && row.video_path.startsWith('/media/') ? row.video_path : null,
   };
 }
 
@@ -183,6 +186,7 @@ export default function App() {
 
   const audioContext = useRef<AudioContext | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const videoCanvasRef = useRef<HTMLVideoElement | null>(null);
   const soundNodes = useRef<OscillatorNode[]>([]);
   const gainNode = useRef<GainNode | null>(null);
   const ticker = useRef<number | null>(null);
@@ -264,6 +268,37 @@ export default function App() {
     });
     void audioContext.current?.close();
   }, []);
+
+  useEffect(() => {
+    const video = videoCanvasRef.current;
+    if (!video || !active?.videoUrl) return;
+    if (video.getAttribute('src') !== active.videoUrl) {
+      video.src = active.videoUrl;
+      video.load();
+    }
+    if (!playing) {
+      video.pause();
+      return;
+    }
+    const syncAndPlay = async () => {
+      if (video.readyState >= 1 && Number.isFinite(video.duration) && video.duration > 0) {
+        const clipDuration = Math.min(video.duration, 15);
+        const target = seconds % clipDuration;
+        if (Math.abs(video.currentTime - target) > 1.25) video.currentTime = target;
+      }
+      try { await video.play(); } catch { /* Muted inline playback may be blocked on older browsers. */ }
+    };
+    void syncAndPlay();
+  }, [page, active?.id, active?.videoUrl, playing]);
+
+  useEffect(() => {
+    if (!playing || !active?.videoUrl) return;
+    const video = videoCanvasRef.current;
+    if (!video || video.readyState < 1 || !Number.isFinite(video.duration) || video.duration <= 0) return;
+    const clipDuration = Math.min(video.duration, 15);
+    const target = seconds % clipDuration;
+    if (Math.abs(video.currentTime - target) > 1.5) video.currentTime = target;
+  }, [seconds, playing, active?.id, active?.videoUrl]);
 
   useEffect(() => {
     if (gainNode.current) gainNode.current.gain.value = volume * 0.12;
@@ -570,6 +605,27 @@ export default function App() {
 
         <main className="main-panel">
           <div className="content">
+            {active?.videoUrl && page !== 'admin' && (
+              <section className="now-playing-canvas" aria-label="Now playing music video">
+                <div className="now-playing-canvas-video">
+                  <video
+                    ref={videoCanvasRef}
+                    src={active.videoUrl}
+                    muted
+                    playsInline
+                    loop
+                    preload="metadata"
+                    aria-label={'Canvas video for ' + active.title}
+                  />
+                  <span className="canvas-label">NOW PLAYING · CANVAS</span>
+                </div>
+                <div className="now-playing-canvas-copy">
+                  <small>VISUAL EXPERIENCE</small>
+                  <strong>{active.title}</strong>
+                  <span>{active.artist}</span>
+                </div>
+              </section>
+            )}
             {page === 'home' && <>
               <section className="hero">
                 <div className="hero-copy">
@@ -770,7 +826,17 @@ export default function App() {
         hidden
         ref={audioRef}
         preload="metadata"
-        onTimeUpdate={() => { if (audioRef.current && !audioRef.current.paused) setSeconds(audioRef.current.currentTime); }}
+        onTimeUpdate={() => {
+          if (audioRef.current && !audioRef.current.paused) {
+            const current = audioRef.current.currentTime;
+            setSeconds(current);
+            const video = videoCanvasRef.current;
+            if (video && active?.videoUrl && video.readyState >= 1 && Number.isFinite(video.duration) && video.duration > 0) {
+              const target = current % Math.min(video.duration, 15);
+              if (Math.abs(video.currentTime - target) > 1.5) video.currentTime = target;
+            }
+          }
+        }}
         onPlay={() => setPlaying(true)}
         onPause={() => setPlaying(false)}
         onEnded={() => {
