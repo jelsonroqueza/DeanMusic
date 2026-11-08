@@ -148,7 +148,8 @@ function mapCollectionSearch(term: string, setQuery: (value: string) => void, se
 }
 
 export default function App() {
-  const [page, setPage] = useState<Page>('home');
+  const adminPreviewMode = new URLSearchParams(window.location.search).get('admin-preview') === '1';
+  const [page, setPage] = useState<Page>(() => adminPreviewMode ? 'admin' : 'home');
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState('All');
   const [tracks, setTracks] = useState<Track[]>([demoTrack]);
@@ -671,8 +672,8 @@ export default function App() {
               </section>
             )}
 
-            {page === 'admin' && (isAdmin && user ? (
-              <AdminCentre onExit={() => openPage('home')} onNotice={notify} />
+            {page === 'admin' && (((isAdmin && user) || adminPreviewMode) ? (
+              <AdminCentre previewOnly={adminPreviewMode && !(isAdmin && user)} onExit={() => openPage('home')} onNotice={notify} />
             ) : (
               <section className="page-section"><div className="empty-state"><strong>Admin access required</strong><p>This account is not authorized to manage DeanMusic.</p><button className="primary-button" onClick={() => openPage('home')}>Back to Home</button></div></section>
             ))}
