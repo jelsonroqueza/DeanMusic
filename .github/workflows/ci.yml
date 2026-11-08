@@ -28,7 +28,7 @@ jobs:
       - name: Bundle Cloudflare Pages Functions
         run: |
           mkdir -p .wrangler
-          npx wrangler pages functions build functions --outfile .wrangler/functions.js --outdir .wrangler/functions --output-config-path .wrangler/config.json
+          npx wrangler pages functions build functions --outdir .wrangler/functions --output-config-path .wrangler/config.json
       - name: Validate D1 migration
         run: |
           python3 - <<'PY'
