@@ -48,7 +48,7 @@ function jsonError(message: string, status: number): Response {
 }
 
 function parseByteRange(header: string, size: number): ByteRange | null {
-  const match = header.match(/^bytes=(\\d*)-(\\d*)$/);
+  const match = header.match(/^bytes=(\d*)-(\d*)$/);
   if (!match || size <= 0 || (!match[1] && !match[2])) return null;
 
   let start: number;
@@ -163,7 +163,7 @@ export const onRequest = async ({ request, env }: MediaContext): Promise<Respons
   }
 
   const pathname = new URL(request.url).pathname;
-  const match = pathname.match(/^\\/media\\/([a-f0-9-]{36})$/i);
+  const match = pathname.match(/^\/media\/([a-f0-9-]{36})$/i);
   if (!match) return jsonError('Media not found.', 404);
 
   const key = 'media/' + match[1];
