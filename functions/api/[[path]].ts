@@ -755,6 +755,43 @@ export const onRequest = async ({ request, env }: Context): Promise<Response> =>
   const url = new URL(request.url);
   const path = url.pathname;
 
+  // Cloudflare Preview is intentionally isolated from production D1/KV.
+  // Serve harmless demo fixtures rather than allowing missing bindings to become 500s.
+  if (env.ADMIN_ACCESS_DISABLED === 'true' && !env.DB) {
+    if (path === '/api/health' && request.method === 'GET') {
+      return reply({
+        ok: true,
+        service: 'DeanMusic API',
+        database: 'Isolated Preview demo (no D1 connection)',
+        media: 'Disabled in Preview'
+      });
+    }
+    if (path === '/api/catalog' && request.method === 'GET') {
+      return reply({
+        previewOnly: true,
+        tracks: [{
+          id: 'demo-midnight',
+          title: 'Midnight Reverie',
+          duration_seconds: 24,
+          genre: 'Electronic',
+          audio_path: 'browser-synth',
+          video_path: null,
+          external_audio_url: null,
+          plays_count: 1280,
+          artist_name: 'DeanMusic Originals',
+          album_title: 'Signal One',
+          cover_url: null
+        }]
+      }, 200, 'no-store');
+    }
+    if (path === '/api/albums' && request.method === 'GET') return reply({ previewOnly: true, albums: [] });
+    if (path === '/api/public-playlists' && request.method === 'GET') return reply({ previewOnly: true, playlists: [] });
+    if (path === '/api/admin/status' && request.method === 'GET') return reply({ isAdmin: false, previewOnly: true });
+    if (path === '/api/me' && request.method === 'GET') return reply({ user: null, previewOnly: true });
+    if (path.startsWith('/media/')) return reply({ error: 'Media storage is disabled in isolated Preview.' }, 404);
+    return reply({ error: 'This operation is disabled in isolated Preview. Production D1, KV, and administrator access are not connected.' }, 403);
+  }
+
   if (
     !path.startsWith('/api/auth/') &&
     ['POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method)
