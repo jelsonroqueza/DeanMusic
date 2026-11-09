@@ -2591,3 +2591,23 @@ button:disabled {
   }
   .now-playing-banner-copy h2 { font-size: 26px; }
 }
+
+/* Make the selected vertical Canvas the primary visual surface. */
+.now-playing-canvas {
+  max-width: 940px;
+  gap: 22px;
+  padding: 18px;
+}
+.now-playing-canvas-video {
+  flex-basis: clamp(148px, 17vw, 200px);
+  aspect-ratio: 9 / 16;
+  box-shadow: 0 12px 28px rgba(0,0,0,.28);
+}
+.now-playing-canvas-video video {
+  background: #050706;
+  object-fit: contain;
+}
+@media(max-width:700px) {
+  .now-playing-canvas { gap: 13px; padding: 10px; }
+  .now-playing-canvas-video { flex-basis: 112px; }
+}
