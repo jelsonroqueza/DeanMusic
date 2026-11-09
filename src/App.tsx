@@ -179,6 +179,7 @@ export default function App() {
   const [playlistOpen, setPlaylistOpen] = useState(false);
   const [playlistName, setPlaylistName] = useState('');
   const [active, setActive] = useState<Track | null>(null);
+  const [canvasErrorTrackId, setCanvasErrorTrackId] = useState<string | null>(null);
   const [playing, setPlaying] = useState(false);
   const [seconds, setSeconds] = useState(0);
   const [volume, setVolume] = useState(0.55);
@@ -278,23 +279,34 @@ export default function App() {
   useEffect(() => {
     const video = videoCanvasRef.current;
     if (!video || !active?.videoUrl) return;
+    let cancelled = false;
+    const markCanvasUnavailable = () => {
+      if (!cancelled) setCanvasErrorTrackId(active.id);
+    };
+    const playCanvas = async () => {
+      if (!playing || cancelled) return;
+      try {
+        video.muted = true;
+        video.playsInline = true;
+        await video.play();
+      } catch {
+        markCanvasUnavailable();
+      }
+    };
+    const handleCanPlay = () => { void playCanvas(); };
     if (video.getAttribute('src') !== active.videoUrl) {
       video.src = active.videoUrl;
       video.load();
     }
-    if (!playing) {
-      video.pause();
-      return;
-    }
-    const syncAndPlay = async () => {
-      if (video.readyState >= 1 && Number.isFinite(video.duration) && video.duration > 0) {
-        const clipDuration = Math.min(video.duration, 15);
-        const target = seconds % clipDuration;
-        if (Math.abs(video.currentTime - target) > 1.25) video.currentTime = target;
-      }
-      try { await video.play(); } catch { /* Muted inline playback may be blocked on older browsers. */ }
+    video.addEventListener('error', markCanvasUnavailable);
+    video.addEventListener('canplay', handleCanPlay);
+    if (playing && video.readyState >= 2) void playCanvas();
+    else if (!playing) video.pause();
+    return () => {
+      cancelled = true;
+      video.removeEventListener('error', markCanvasUnavailable);
+      video.removeEventListener('canplay', handleCanPlay);
     };
-    void syncAndPlay();
   }, [page, active?.id, active?.videoUrl, playing]);
 
   useEffect(() => {
@@ -376,6 +388,7 @@ export default function App() {
 
   const chooseTrack = (track: Track) => {
     stopSound();
+    setCanvasErrorTrackId(null);
     setActive(track);
     setSeconds(0);
     setRecentTracks((current) => {
@@ -611,7 +624,7 @@ export default function App() {
 
         <main className="main-panel">
           <div className="content">
-            {active && (active.bannerUrl || active.albumBannerUrl) && !active.videoUrl && page !== 'admin' && (
+            {active && (active.bannerUrl || active.albumBannerUrl) && (!active.videoUrl || canvasErrorTrackId === active.id) && page !== 'admin' && (
               <section
                 className="now-playing-banner"
                 aria-label={'Banner artwork for ' + active.title}
@@ -624,7 +637,7 @@ export default function App() {
                 </div>
               </section>
             )}
-            {active?.videoUrl && page !== 'admin' && (
+            {active?.videoUrl && canvasErrorTrackId !== active.id && page !== 'admin' && (
               <section className="now-playing-canvas" aria-label="Now playing music video">
                 <div className="now-playing-canvas-video">
                   <video
@@ -632,8 +645,12 @@ export default function App() {
                     src={active.videoUrl}
                     muted
                     playsInline
+                    autoPlay
                     loop
-                    preload="metadata"
+                    preload="auto"
+                    poster={active.bannerUrl || active.albumBannerUrl || undefined}
+                    onCanPlay={(event) => { if (playing) void event.currentTarget.play().catch(() => setCanvasErrorTrackId(active.id)); }}
+                    onError={() => setCanvasErrorTrackId(active.id)}
                     aria-label={'Canvas video for ' + active.title}
                   />
                   <span className="canvas-label">NOW PLAYING · CANVAS</span>
