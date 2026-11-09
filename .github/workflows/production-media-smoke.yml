@@ -27,7 +27,7 @@ jobs:
           const catalog = await catalogResponse.json();
           const track = (catalog.tracks ?? []).find((item) =>
             typeof item.audio_path === 'string' &&
-            /^\\/media\\/[a-f0-9-]{36}$/i.test(item.audio_path)
+            item.audio_path.startsWith('/media/') && /^[a-f0-9-]{36}$/.test(item.audio_path.slice('/media/'.length))
           );
           if (!track) {
             throw new Error('No published track with a DeanMusic /media audio path was found.');
