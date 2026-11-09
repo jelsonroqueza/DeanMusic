@@ -650,13 +650,18 @@ async function uploadMedia(request: Request, env: Env, admin: UserRecord): Promi
     }
     await env.DB.prepare("UPDATE media_assets SET status = 'ready' WHERE id = ?").bind(id).run();
   } catch (error) {
+    let objectRemoved = false;
     try {
       if (provider === 'r2' && env.MEDIA_R2) await env.MEDIA_R2.delete(key);
       else await env.MEDIA.delete(key);
+      objectRemoved = true;
     } catch (cleanupError) {
-      console.error('DeanMusic upload cleanup could not remove a partial media object:', cleanupError);
+      console.error('DeanMusic upload cleanup could not remove a partial media object; its pending inventory reservation is retained:', cleanupError);
     }
-    await env.DB.prepare('DELETE FROM media_assets WHERE id = ?').bind(id).run();
+    if (objectRemoved) {
+      await env.DB.prepare('DELETE FROM media_assets WHERE id = ?').bind(id).run();
+    }
+    // If cleanup itself failed, keep the pending row so its reserved bytes remain in the usage meter.
     throw error;
   }
 
