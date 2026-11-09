@@ -54,7 +54,7 @@ jobs:
                 throw new Error('Live catalog has not exposed the new soundtrack/album banner fields yet.');
               }
               scripts = [...html.matchAll(/<script[^>]+src=["']([^"']+)["']/g)].map((match) => match[1]);
-              const jsAssets = scripts.filter((src) => /\\.js(?:\\?|$)/i.test(src));
+              const jsAssets = scripts.filter((src) => src.toLowerCase().includes('.js'));
               const jsBodies = await Promise.all(jsAssets.map(async (src) => {
                 const url = new URL(src, base).toString();
                 const response = await fetch(url, { cache: 'no-store' });
