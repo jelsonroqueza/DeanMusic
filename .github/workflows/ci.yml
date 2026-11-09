@@ -104,7 +104,17 @@ jobs:
           app_source = Path("src/App.tsx").read_text(encoding="utf-8")
           assert "albumBannerUrl" in app_source and "bannerUrl" in app_source, "Public listener views must consume track and album banners."
           assert "now-playing-banner" in app_source, "Public wide banner display is missing."
+          assert "autoPlay" in app_source and "onCanPlay" in app_source, "Canvas video must auto-start when a track is selected."
+          assert "canvasErrorTrackId" in app_source, "Canvas playback failure must trigger the banner fallback."
+          assert "canvasErrorTrackId !== active.id" in app_source, "Canvas must take visual priority when it is available."
+          assert "!active.videoUrl || canvasErrorTrackId === active.id" in app_source, "Track/album banner must show when Canvas is absent or unavailable."
           assert "reconcileLegacyKvMedia" in api_source, "Legacy KV media inventory reconciliation is missing."
+          media_route_path = Path("functions/media/[id].ts")
+          assert media_route_path.exists(), "Dedicated /media/:id Pages Function route is missing."
+          media_route = media_route_path.read_text(encoding="utf-8")
+          assert "parseByteRange" in media_route and "status: 206" in media_route, "Media route must support byte-range streaming."
+          assert "getWithMetadata" in media_route and "MEDIA?: KVNamespace" in media_route, "Media route must serve existing KV media objects."
+          assert "env.MEDIA_R2" in media_route and "Content-Range" in media_route and "Accept-Ranges" in media_route, "Media route must retain optional R2 compatibility and range headers."
           assert "Isolated Preview demo (no D1 connection)" in api_source, "Preview must provide safe demo API responses without production bindings."
 
           signal_one = db.execute("SELECT is_published FROM albums WHERE id='signal-one'").fetchone()
