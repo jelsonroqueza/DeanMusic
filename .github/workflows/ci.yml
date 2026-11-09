@@ -84,6 +84,12 @@ jobs:
           assert "token.length >= 43" in api_source, "First-admin activation must require a 32-byte random token."
           assert "failed_attempts + 1" in api_source and "+15 minutes" in api_source, "First-admin activation lockout is missing."
           assert "parseMp4CanvasInfo" in api_source and "parseWebmCanvasInfo" in api_source, "Server-side Canvas container validation is missing."
+          assert "MAX_AUDIO_BYTES = 24 * 1024 * 1024" in api_source, "Audio uploads must be capped at 24 MiB per KV object."
+          assert "Audio files must be 24 MiB or smaller." in api_source, "Audio upload error text must match the 24 MiB limit."
+          admin_source = Path("src/AdminCentre.tsx").read_text(encoding="utf-8")
+          assert "max 24 MiB each" in admin_source, "Admin Centre audio upload hint must show the 24 MiB limit."
+          assert "add, replace, or remove it later using Edit on the track" in admin_source, "Canvas must be clearly described as optional and editable later."
+          assert "Add Canvas video" in admin_source and "Replace Canvas video" in admin_source, "Edit Track must support adding and replacing Canvas video."
           assert "reconcileLegacyKvMedia" in api_source, "Legacy KV media inventory reconciliation is missing."
           assert "Isolated Preview demo (no D1 connection)" in api_source, "Preview must provide safe demo API responses without production bindings."
 
