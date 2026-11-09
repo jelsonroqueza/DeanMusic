@@ -1,0 +1,85 @@
+name: DeanMusic production media playback smoke test
+
+on:
+  push:
+    branches:
+      - fix/live-media-stream-route-20261109
+    paths:
+      - .github/workflows/production-media-smoke.yml
+
+permissions:
+  contents: read
+
+jobs:
+  media-playback:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Verify public catalog exposes a published audio file
+        run: |
+          node --input-type=module <<'NODE'
+          const base = 'https://deanmusic.pages.dev';
+          const catalogUrl = base + '/api/catalog?media-smoke=' + Date.now();
+          const catalogResponse = await fetch(catalogUrl, { cache: 'no-store' });
+          if (!catalogResponse.ok) {
+            throw new Error('Production catalog returned HTTP ' + catalogResponse.status);
+          }
+          const catalog = await catalogResponse.json();
+          const track = (catalog.tracks ?? []).find((item) =>
+            typeof item.audio_path === 'string' &&
+            /^\\/media\\/[a-f0-9-]{36}$/i.test(item.audio_path)
+          );
+          if (!track) {
+            throw new Error('No published track with a DeanMusic /media audio path was found.');
+          }
+
+          const mediaUrl = new URL(track.audio_path, base).toString();
+          console.log('Testing published track: ' + track.title);
+          console.log('Media route: ' + new URL(mediaUrl).pathname);
+
+          let head = null;
+          for (let attempt = 0; attempt < 24; attempt += 1) {
+            head = await fetch(mediaUrl, { method: 'HEAD', cache: 'no-store' });
+            const type = head.headers.get('content-type') ?? '';
+            const size = Number(head.headers.get('content-length') ?? 0);
+            const ranges = head.headers.get('accept-ranges') ?? '';
+            if (head.status === 200 && type.toLowerCase().startsWith('audio/') && size > 0 && ranges.toLowerCase() === 'bytes') {
+              break;
+            }
+            await new Promise((resolve) => setTimeout(resolve, 5000));
+          }
+
+          const contentType = head?.headers.get('content-type') ?? '';
+          const totalSize = Number(head?.headers.get('content-length') ?? 0);
+          if (!head || head.status !== 200 || !contentType.toLowerCase().startsWith('audio/') || totalSize <= 0) {
+            throw new Error(
+              'Audio HEAD check failed: HTTP ' + head?.status +
+              ', Content-Type=' + contentType +
+              ', Content-Length=' + totalSize
+            );
+          }
+          console.log('HEAD passed: ' + contentType + ', ' + totalSize + ' bytes.');
+
+          const rangeResponse = await fetch(mediaUrl, {
+            headers: { Range: 'bytes=0-1023' },
+            cache: 'no-store'
+          });
+          if (rangeResponse.status !== 206) {
+            throw new Error('Audio range request expected HTTP 206, received ' + rangeResponse.status);
+          }
+          const expectedLength = Math.min(1024, totalSize);
+          const range = rangeResponse.headers.get('content-range') ?? '';
+          const rangeBody = await rangeResponse.arrayBuffer();
+          if (range !== 'bytes 0-' + (expectedLength - 1) + '/' + totalSize) {
+            throw new Error('Unexpected Content-Range: ' + range);
+          }
+          if (rangeBody.byteLength !== expectedLength) {
+            throw new Error('Unexpected range body length: ' + rangeBody.byteLength);
+          }
+          if (!(rangeResponse.headers.get('content-type') ?? '').toLowerCase().startsWith('audio/')) {
+            throw new Error('Range response did not retain an audio Content-Type.');
+          }
+
+          console.log('RANGE passed: HTTP 206, ' + range + ', ' + rangeBody.byteLength + ' bytes.');
+          console.log('SUCCESS: The live DeanMusic audio file is reachable and supports byte-range playback/seeking.');
+          NODE
