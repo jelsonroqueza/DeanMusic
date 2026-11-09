@@ -98,7 +98,309 @@ async function sha256Hex(value: string): Promise<string> {
 }
 
 
+
+async function ensureAdminActivationAttemptsSchema(env: Env): Promise<void> {
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS admin_activation_attempts (
+    user_id TEXT PRIMARY KEY NOT NULL REFERENCES user(id) ON DELETE CASCADE,
+    failed_attempts INTEGER NOT NULL DEFAULT 0 CHECK (failed_attempts >= 0),
+    locked_until TEXT,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )`).run();
+}
+
+async function getAdminActivationAttempts(
+  env: Env,
+  userId: string
+): Promise<{ failed_attempts: number; locked_until: string | null } | null> {
+  return await env.DB.prepare(
+    'SELECT failed_attempts, locked_until FROM admin_activation_attempts WHERE user_id = ?'
+  ).bind(userId).first<{ failed_attempts: number; locked_until: string | null }>();
+}
+
+async function recordAdminActivationFailure(env: Env, userId: string): Promise<void> {
+  await env.DB.prepare(`
+    INSERT INTO admin_activation_attempts (user_id, failed_attempts, locked_until)
+    VALUES (?, 1, NULL)
+    ON CONFLICT(user_id) DO UPDATE SET
+      failed_attempts = CASE
+        WHEN admin_activation_attempts.locked_until IS NOT NULL
+          AND admin_activation_attempts.locked_until <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+        THEN 1
+        ELSE admin_activation_attempts.failed_attempts + 1
+      END,
+      locked_until = CASE
+        WHEN (
+          CASE
+            WHEN admin_activation_attempts.locked_until IS NOT NULL
+              AND admin_activation_attempts.locked_until <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+            THEN 1
+            ELSE admin_activation_attempts.failed_attempts + 1
+          END
+        ) >= 5
+        THEN strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '+15 minutes')
+        ELSE NULL
+      END,
+      updated_at = datetime('now')
+  `).bind(userId).run();
+}
+
+function readIsoBoxes(view: DataView, start: number, end: number): Array<{ type: string; start: number; end: number }> {
+  const boxes: Array<{ type: string; start: number; end: number }> = [];
+  let offset = start;
+  while (offset + 8 <= end) {
+    const size32 = view.getUint32(offset);
+    const type = String.fromCharCode(
+      view.getUint8(offset + 4), view.getUint8(offset + 5),
+      view.getUint8(offset + 6), view.getUint8(offset + 7)
+    );
+    let headerSize = 8;
+    let boxSize = size32;
+    if (size32 === 1) {
+      if (offset + 16 > end) break;
+      const extended = view.getBigUint64(offset + 8);
+      if (extended > BigInt(Number.MAX_SAFE_INTEGER)) break;
+      boxSize = Number(extended);
+      headerSize = 16;
+    } else if (size32 === 0) {
+      boxSize = end - offset;
+    }
+    if (!Number.isSafeInteger(boxSize) || boxSize < headerSize || offset + boxSize > end) break;
+    boxes.push({ type, start: offset + headerSize, end: offset + boxSize });
+    offset += boxSize;
+  }
+  return boxes;
+}
+
+function parseMp4CanvasInfo(buffer: ArrayBuffer): { duration: number; width: number; height: number } | null {
+  try {
+    const view = new DataView(buffer);
+    const top = readIsoBoxes(view, 0, view.byteLength);
+    if (!top.some((box) => box.type === 'ftyp')) return null;
+    const moov = top.find((box) => box.type === 'moov');
+    if (!moov) return null;
+    const moovChildren = readIsoBoxes(view, moov.start, moov.end);
+    const mvhd = moovChildren.find((box) => box.type === 'mvhd');
+    if (!mvhd || mvhd.start + 20 > mvhd.end) return null;
+    const mvhdVersion = view.getUint8(mvhd.start);
+    let timescale = 0;
+    let durationUnits = 0;
+    if (mvhdVersion === 1) {
+      if (mvhd.start + 32 > mvhd.end) return null;
+      timescale = view.getUint32(mvhd.start + 20);
+      const durationValue = view.getBigUint64(mvhd.start + 24);
+      durationUnits = Number(durationValue);
+    } else if (mvhdVersion === 0) {
+      timescale = view.getUint32(mvhd.start + 12);
+      durationUnits = view.getUint32(mvhd.start + 16);
+    } else {
+      return null;
+    }
+    if (!timescale || !Number.isFinite(durationUnits) || durationUnits <= 0) return null;
+    const duration = durationUnits / timescale;
+
+    for (const track of moovChildren.filter((box) => box.type === 'trak')) {
+      const trackChildren = readIsoBoxes(view, track.start, track.end);
+      const mdia = trackChildren.find((box) => box.type === 'mdia');
+      if (!mdia) continue;
+      const mediaChildren = readIsoBoxes(view, mdia.start, mdia.end);
+      const handler = mediaChildren.find((box) => box.type === 'hdlr');
+      const tkhd = trackChildren.find((box) => box.type === 'tkhd');
+      if (!handler || !tkhd || handler.start + 12 > handler.end) continue;
+      const handlerType = String.fromCharCode(
+        view.getUint8(handler.start + 8), view.getUint8(handler.start + 9),
+        view.getUint8(handler.start + 10), view.getUint8(handler.start + 11)
+      );
+      if (handlerType !== 'vide') continue;
+      const version = view.getUint8(tkhd.start);
+      const dimensionsOffset = version === 1 ? tkhd.start + 88 : tkhd.start + 76;
+      if (dimensionsOffset + 8 > tkhd.end) return null;
+      const width = view.getUint32(dimensionsOffset) / 65536;
+      const height = view.getUint32(dimensionsOffset + 4) / 65536;
+      if (width > 0 && height > 0) return { duration, width, height };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function readEbmlVint(view: DataView, offset: number, removeMarker: boolean): { value: bigint; length: number; unknown: boolean } | null {
+  if (offset >= view.byteLength) return null;
+  const first = view.getUint8(offset);
+  let marker = 0x80;
+  let length = 1;
+  while (length <= 8 && (first & marker) === 0) {
+    marker >>= 1;
+    length += 1;
+  }
+  if (length > 8 || offset + length > view.byteLength) return null;
+  let value = BigInt(removeMarker ? (first & (marker - 1)) : first);
+  for (let index = 1; index < length; index += 1) {
+    value = (value << 8n) | BigInt(view.getUint8(offset + index));
+  }
+  const maximum = (1n << BigInt(7 * length)) - 1n;
+  return { value, length, unknown: removeMarker && value === maximum };
+}
+
+function readEbmlElements(
+  view: DataView,
+  start: number,
+  end: number
+): Array<{ id: bigint; start: number; end: number }> {
+  const elements: Array<{ id: bigint; start: number; end: number }> = [];
+  let offset = start;
+  while (offset < end) {
+    const id = readEbmlVint(view, offset, false);
+    if (!id) break;
+    const size = readEbmlVint(view, offset + id.length, true);
+    if (!size) break;
+    const dataStart = offset + id.length + size.length;
+    const dataEnd = size.unknown ? end : dataStart + Number(size.value);
+    if (!Number.isSafeInteger(dataEnd) || dataEnd < dataStart || dataEnd > end) break;
+    elements.push({ id: id.value, start: dataStart, end: dataEnd });
+    offset = dataEnd;
+    if (size.unknown) break;
+  }
+  return elements;
+}
+
+function readEbmlUnsigned(view: DataView, start: number, end: number): number | null {
+  const length = end - start;
+  if (length < 1 || length > 8) return null;
+  let value = 0n;
+  for (let offset = start; offset < end; offset += 1) {
+    value = (value << 8n) | BigInt(view.getUint8(offset));
+  }
+  const number = Number(value);
+  return Number.isSafeInteger(number) ? number : null;
+}
+
+function parseWebmCanvasInfo(buffer: ArrayBuffer): { duration: number; width: number; height: number } | null {
+  try {
+    const view = new DataView(buffer);
+    const top = readEbmlElements(view, 0, view.byteLength);
+    const header = top.find((element) => element.id === 0x1A45DFA3n);
+    const segment = top.find((element) => element.id === 0x18538067n);
+    if (!header || !segment) return null;
+    const docType = readEbmlElements(view, header.start, header.end).find((element) => element.id === 0x4282n);
+    if (!docType) return null;
+    let docTypeText = '';
+    for (let offset = docType.start; offset < docType.end; offset += 1) docTypeText += String.fromCharCode(view.getUint8(offset));
+    if (docTypeText.toLowerCase() !== 'webm') return null;
+
+    const segmentChildren = readEbmlElements(view, segment.start, segment.end);
+    const info = segmentChildren.find((element) => element.id === 0x1549A966n);
+    const tracks = segmentChildren.find((element) => element.id === 0x1654AE6Bn);
+    if (!info || !tracks) return null;
+    const infoChildren = readEbmlElements(view, info.start, info.end);
+    const durationElement = infoChildren.find((element) => element.id === 0x4489n);
+    const scaleElement = infoChildren.find((element) => element.id === 0x2AD7B1n);
+    if (!durationElement) return null;
+    const durationLength = durationElement.end - durationElement.start;
+    const durationValue = durationLength === 4
+      ? view.getFloat32(durationElement.start)
+      : durationLength === 8 ? view.getFloat64(durationElement.start) : NaN;
+    const timecodeScale = scaleElement
+      ? readEbmlUnsigned(view, scaleElement.start, scaleElement.end) ?? 1_000_000
+      : 1_000_000;
+    const duration = durationValue * timecodeScale / 1_000_000_000;
+    if (!Number.isFinite(duration) || duration <= 0) return null;
+
+    for (const trackEntry of readEbmlElements(view, tracks.start, tracks.end).filter((element) => element.id === 0xAEn)) {
+      const trackChildren = readEbmlElements(view, trackEntry.start, trackEntry.end);
+      const typeElement = trackChildren.find((element) => element.id === 0x83n);
+      if (!typeElement || readEbmlUnsigned(view, typeElement.start, typeElement.end) !== 1) continue;
+      const video = trackChildren.find((element) => element.id === 0xE0n);
+      if (!video) continue;
+      const videoChildren = readEbmlElements(view, video.start, video.end);
+      const widthElement = videoChildren.find((element) => element.id === 0xB0n);
+      const heightElement = videoChildren.find((element) => element.id === 0xBAn);
+      if (!widthElement || !heightElement) return null;
+      const width = readEbmlUnsigned(view, widthElement.start, widthElement.end) ?? 0;
+      const height = readEbmlUnsigned(view, heightElement.start, heightElement.end) ?? 0;
+      if (width > 0 && height > 0) return { duration, width, height };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+async function validateCanvasVideoOnServer(upload: File): Promise<string | null> {
+  try {
+    const buffer = await upload.arrayBuffer();
+    const metadata = upload.type === 'video/mp4'
+      ? parseMp4CanvasInfo(buffer)
+      : parseWebmCanvasInfo(buffer);
+    if (!metadata) return 'The server could not verify this MP4/WebM video. Re-export it as a standard MP4 or WebM file.';
+    if (metadata.duration > 15.05) return 'Canvas videos must be 15 seconds or shorter.';
+    if (metadata.width < 720 || metadata.height < 1280) return 'Use an HD vertical video with at least 720 × 1280 resolution.';
+    if (Math.abs((metadata.width / metadata.height) - (9 / 16)) > 0.04) return 'Canvas videos must use a vertical 9:16 aspect ratio.';
+    return null;
+  } catch {
+    return 'The server could not read this video file. Please re-export it as MP4 or WebM.';
+  }
+}
+
+async function reconcileLegacyKvMedia(
+  env: Env,
+  adminId: string,
+  cursor?: string
+): Promise<{ processed: number; imported: number; skipped: number; complete: boolean; cursor: string | null }> {
+  const page = await env.MEDIA.list({ prefix: 'media/', limit: 100, ...(cursor ? { cursor } : {}) });
+  let processed = 0;
+  let imported = 0;
+  let skipped = 0;
+
+  for (const key of page.keys) {
+    processed += 1;
+    const match = key.name.match(/^media\/([a-f0-9-]{36})$/i);
+    if (!match) {
+      skipped += 1;
+      continue;
+    }
+
+    let metadata = (key.metadata ?? null) as MediaMetadata | null;
+    let size = Number(metadata?.size ?? 0);
+    if (!Number.isFinite(size) || size <= 0 || !metadata?.contentType) {
+      const stored = await env.MEDIA.getWithMetadata<MediaMetadata>(key.name, 'arrayBuffer');
+      if (!stored.value) {
+        skipped += 1;
+        continue;
+      }
+      metadata = stored.metadata ?? metadata;
+      if (!Number.isFinite(size) || size <= 0) size = (stored.value as ArrayBuffer).byteLength;
+    }
+    if (!Number.isFinite(size) || size <= 0) {
+      skipped += 1;
+      continue;
+    }
+
+    const contentType = safeText(metadata?.contentType, 120) || 'application/octet-stream';
+    const fileName = safeText(metadata?.fileName, 120) || match[1];
+    const kind: 'audio' | 'image' | 'video' = contentType.startsWith('image/')
+      ? 'image'
+      : contentType.startsWith('video/') ? 'video' : 'audio';
+    const result = await env.DB.prepare(`
+      INSERT OR IGNORE INTO media_assets
+        (id, provider, object_key, media_kind, file_name, content_type, size_bytes, created_by, status)
+      VALUES (?, 'kv', ?, ?, ?, ?, ?, ?, 'ready')
+    `).bind(match[1], key.name, kind, fileName, contentType, Math.floor(size), adminId).run();
+    imported += Number(result.meta.changes ?? 0);
+    if (!result.meta.changes) skipped += 1;
+  }
+
+  return {
+    processed,
+    imported,
+    skipped,
+    complete: page.list_complete,
+    cursor: page.list_complete ? null : (page.cursor ?? null)
+  };
+}
+
 async function ensureAdminSchema(env: Env): Promise<void> {
+  await ensureAdminActivationAttemptsSchema(env);
   // The first valid owner activation can safely recover the Admin Centre schema
   // if the production D1 database missed migration 0002.
   const adminTableSql = `CREATE TABLE IF NOT EXISTS admins (
@@ -310,10 +612,8 @@ async function uploadMedia(request: Request, env: Env, admin: UserRecord): Promi
     }, 413);
   }
   if (kind === 'video') {
-    const seconds = Number(form.get('durationSeconds'));
-    if (!Number.isFinite(seconds) || seconds <= 0 || seconds > 15.05) {
-      return reply({ error: 'Canvas videos must be 15 seconds or shorter. Check the selected video duration.' }, 400);
-    }
+    const validationError = await validateCanvasVideoOnServer(upload);
+    if (validationError) return reply({ error: validationError }, 400);
   }
 
   const provider: 'r2' | 'kv' = env.MEDIA_R2 ? 'r2' : 'kv';
@@ -350,7 +650,18 @@ async function uploadMedia(request: Request, env: Env, admin: UserRecord): Promi
     }
     await env.DB.prepare("UPDATE media_assets SET status = 'ready' WHERE id = ?").bind(id).run();
   } catch (error) {
-    await env.DB.prepare('DELETE FROM media_assets WHERE id = ?').bind(id).run();
+    let objectRemoved = false;
+    try {
+      if (provider === 'r2' && env.MEDIA_R2) await env.MEDIA_R2.delete(key);
+      else await env.MEDIA.delete(key);
+      objectRemoved = true;
+    } catch (cleanupError) {
+      console.error('DeanMusic upload cleanup could not remove a partial media object; its pending inventory reservation is retained:', cleanupError);
+    }
+    if (objectRemoved) {
+      await env.DB.prepare('DELETE FROM media_assets WHERE id = ?').bind(id).run();
+    }
+    // If cleanup itself failed, keep the pending row so its reserved bytes remain in the usage meter.
     throw error;
   }
 
@@ -448,6 +759,43 @@ async function serveMedia(request: Request, env: Env, id: string): Promise<Respo
 export const onRequest = async ({ request, env }: Context): Promise<Response> => {
   const url = new URL(request.url);
   const path = url.pathname;
+
+  // Cloudflare Preview is intentionally isolated from production D1/KV.
+  // Serve harmless demo fixtures rather than allowing missing bindings to become 500s.
+  if (env.ADMIN_ACCESS_DISABLED === 'true' && !env.DB) {
+    if (path === '/api/health' && request.method === 'GET') {
+      return reply({
+        ok: true,
+        service: 'DeanMusic API',
+        database: 'Isolated Preview demo (no D1 connection)',
+        media: 'Disabled in Preview'
+      });
+    }
+    if (path === '/api/catalog' && request.method === 'GET') {
+      return reply({
+        previewOnly: true,
+        tracks: [{
+          id: 'demo-midnight',
+          title: 'Midnight Reverie',
+          duration_seconds: 24,
+          genre: 'Electronic',
+          audio_path: 'browser-synth',
+          video_path: null,
+          external_audio_url: null,
+          plays_count: 1280,
+          artist_name: 'DeanMusic Originals',
+          album_title: 'Signal One',
+          cover_url: null
+        }]
+      }, 200, 'no-store');
+    }
+    if (path === '/api/albums' && request.method === 'GET') return reply({ previewOnly: true, albums: [] });
+    if (path === '/api/public-playlists' && request.method === 'GET') return reply({ previewOnly: true, playlists: [] });
+    if (path === '/api/admin/status' && request.method === 'GET') return reply({ isAdmin: false, previewOnly: true });
+    if (path === '/api/me' && request.method === 'GET') return reply({ user: null, previewOnly: true });
+    if (path.startsWith('/media/')) return reply({ error: 'Media storage is disabled in isolated Preview.' }, 404);
+    return reply({ error: 'This operation is disabled in isolated Preview. Production D1, KV, and administrator access are not connected.' }, 403);
+  }
 
   if (
     !path.startsWith('/api/auth/') &&
@@ -661,14 +1009,32 @@ export const onRequest = async ({ request, env }: Context): Promise<Response> =>
         return reply({ error: 'Admin activation is unavailable for this account.' }, 403);
       }
 
+      try {
+        await ensureAdminActivationAttemptsSchema(env);
+      } catch (error) {
+        console.error('DeanMusic administrator activation lockout schema is unavailable:', error);
+        return reply({ error: 'Admin activation is temporarily unavailable. Please try again later.' }, 503);
+      }
+
+      const attempts = await getAdminActivationAttempts(env, user.id);
+      const lockedUntil = attempts?.locked_until ? Date.parse(attempts.locked_until) : NaN;
+      if (Number.isFinite(lockedUntil) && lockedUntil > Date.now()) {
+        return reply({ error: 'Too many incorrect activation attempts. Please wait 15 minutes before trying again.' }, 429);
+      }
+
       const body = await bodyJson<{ token?: unknown }>(request);
       const token = typeof body?.token === 'string' ? body.token.trim() : '';
-      if (token.length < 32 || token.length > 128) {
-        return reply({ error: 'The one-time activation code is invalid or expired.' }, 403);
-      }
-      const actualHash = await sha256Hex(token);
-      if (!constantTimeEqual(actualHash, expectedHash)) {
-        return reply({ error: 'The one-time activation code is invalid or expired.' }, 403);
+      const validTokenLength = token.length >= 43 && token.length <= 128;
+      const actualHash = validTokenLength ? await sha256Hex(token) : '';
+      if (!validTokenLength || !constantTimeEqual(actualHash, expectedHash)) {
+        await recordAdminActivationFailure(env, user.id);
+        const updatedAttempts = await getAdminActivationAttempts(env, user.id);
+        const isLocked = Boolean(updatedAttempts?.locked_until && Date.parse(updatedAttempts.locked_until) > Date.now());
+        return reply({
+          error: isLocked
+            ? 'Too many incorrect activation attempts. Please wait 15 minutes before trying again.'
+            : 'The one-time activation code is invalid or expired.'
+        }, isLocked ? 429 : 403);
       }
 
       try {
@@ -687,12 +1053,31 @@ export const onRequest = async ({ request, env }: Context): Promise<Response> =>
       if (!inserted.meta.changes) {
         return reply({ error: 'The first administrator has already been activated.' }, 409);
       }
+      await env.DB.prepare('DELETE FROM admin_activation_attempts WHERE user_id = ?').bind(user.id).run();
       return reply({ isAdmin: true, activated: true }, 201);
     }
 
     if (path === '/api/admin/status' && request.method === 'GET') {
       const user = await getUser(request, env);
       return reply({ isAdmin: user ? await isAdmin(user, env) : false });
+    }
+
+    if (path === '/api/admin/media/reconcile' && request.method === 'POST') {
+      const admin = await getAdmin(request, env);
+      if (!admin) return reply({ error: 'Admin access required.' }, 403);
+      if (env.MEDIA_R2) return reply({ error: 'The active provider is R2; this scan is only for legacy KV objects.' }, 409);
+      await ensureMediaSchema(env);
+      const body = await bodyJson<{ cursor?: unknown }>(request);
+      const cursor = typeof body?.cursor === 'string' && body.cursor.length <= 4096 ? body.cursor : undefined;
+      const result = await reconcileLegacyKvMedia(env, admin.id, cursor);
+      const usedBytes = await mediaUsage(env, 'kv');
+      return reply({
+        ...result,
+        provider: 'Cloudflare Workers KV',
+        usedBytes,
+        limitBytes: KV_STORAGE_LIMIT_BYTES,
+        warningBytes: Math.floor(KV_STORAGE_LIMIT_BYTES * 0.8)
+      });
     }
 
     if (path === '/api/admin/media' && request.method === 'POST') {

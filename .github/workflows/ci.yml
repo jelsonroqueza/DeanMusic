@@ -47,6 +47,7 @@ jobs:
           assert any(item.get("binding") == "MEDIA" and item.get("id") == "d962e53d719940c386c02a2da54b71ba" for item in production_kv), "Production MEDIA binding is missing or does not point to DeanMusic KV."
           assert not preview.get("d1_databases") and not preview.get("kv_namespaces"), "Preview must remain isolated until separate staging D1 and KV resources exist."
           assert preview.get("vars", {}).get("ADMIN_ACCESS_DISABLED") == "true", "Preview admin access must remain disabled."
+          assert "ADMIN_BOOTSTRAP_SHA256" not in production.get("vars", {}), "The bootstrap verifier must not be stored as a plain Wrangler variable."
 
           migration_dir = Path("cloudflare/migrations")
           migrations = sorted(migration_dir.glob("*.sql"))
@@ -60,7 +61,7 @@ jobs:
           expected = {
               "user", "session", "account", "verification", "artists", "albums",
               "tracks", "playlists", "playlist_tracks", "liked_tracks", "follows",
-              "saved_albums", "recently_played", "admins", "media_assets"
+              "saved_albums", "recently_played", "admins", "media_assets", "admin_activation_attempts"
           }
           actual = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
           missing = expected - actual
@@ -80,6 +81,11 @@ jobs:
           assert "ALTER TABLE tracks ADD COLUMN video_path TEXT" in api_source, "Idempotent Canvas video_path schema recovery is missing."
           assert "R2_STORAGE_LIMIT_BYTES = 100_000_000_000" in api_source, "The DeanMusic 100 GB storage ceiling is missing."
           assert "R2_STORAGE_WARNING_BYTES = 80_000_000_000" in api_source, "The DeanMusic 80 GB storage warning is missing."
+          assert "token.length >= 43" in api_source, "First-admin activation must require a 32-byte random token."
+          assert "failed_attempts + 1" in api_source and "+15 minutes" in api_source, "First-admin activation lockout is missing."
+          assert "parseMp4CanvasInfo" in api_source and "parseWebmCanvasInfo" in api_source, "Server-side Canvas container validation is missing."
+          assert "reconcileLegacyKvMedia" in api_source, "Legacy KV media inventory reconciliation is missing."
+          assert "Isolated Preview demo (no D1 connection)" in api_source, "Preview must provide safe demo API responses without production bindings."
 
           track = db.execute("SELECT title, audio_path FROM tracks WHERE id='demo-midnight'").fetchone()
           assert track == ("Midnight Reverie", "browser-synth"), track
