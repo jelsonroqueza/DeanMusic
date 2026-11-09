@@ -68,9 +68,12 @@ jobs:
           assert not missing, f"Missing tables after all migrations: {sorted(missing)}"
 
           album_columns = {row[1] for row in db.execute("PRAGMA table_info(albums)")}
-          required_album_columns = {"description", "is_published", "published_at", "created_by"}
+          required_album_columns = {"description", "is_published", "published_at", "created_by", "banner_url"}
           missing_columns = required_album_columns - album_columns
           assert not missing_columns, f"Missing Admin Centre album columns: {sorted(missing_columns)}"
+
+          track_columns = {row[1] for row in db.execute("PRAGMA table_info(tracks)")}
+          assert "banner_url" in track_columns, "Missing soundtrack banner column."
 
           media_columns = {row[1] for row in db.execute("PRAGMA table_info(media_assets)")}
           required_media_columns = {"id", "provider", "object_key", "media_kind", "file_name", "content_type", "size_bytes", "created_by", "status"}
@@ -86,10 +89,20 @@ jobs:
           assert "parseMp4CanvasInfo" in api_source and "parseWebmCanvasInfo" in api_source, "Server-side Canvas container validation is missing."
           assert "MAX_AUDIO_BYTES = 24 * 1024 * 1024" in api_source, "Audio uploads must be capped at 24 MiB per KV object."
           assert "Audio files must be 24 MiB or smaller." in api_source, "Audio upload error text must match the 24 MiB limit."
+          assert "publishImmediately = body?.publishImmediately !== false" in api_source, "New soundtrack uploads must publish immediately by default."
+          assert "resolvedArtistName = artistName || album.artist_name" in api_source, "Track-specific artist attribution is missing."
+          assert "UPDATE albums SET is_published = 1" in api_source, "Publish-immediately must publish the selected album."
+          assert "newBannerUrl" in api_source and "banner_url" in api_source, "Track banner APIs are missing."
+          assert "bannerUrl" in api_source and "album.banner_url" in api_source, "Album banner APIs are missing."
           admin_source = Path("src/AdminCentre.tsx").read_text(encoding="utf-8")
           assert "max 24 MiB each" in admin_source, "Admin Centre audio upload hint must show the 24 MiB limit."
           assert "add, replace, or remove it later using Edit on the track" in admin_source, "Canvas must be clearly described as optional and editable later."
           assert "Add Canvas video" in admin_source and "Replace Canvas video" in admin_source, "Edit Track must support adding and replacing Canvas video."
+          assert "Artist name" in admin_source and "trackArtistName" in admin_source, "Individual soundtrack artist input is missing."
+          assert "Publish immediately" in admin_source, "Admin Centre publish-immediately option is missing."
+          assert "Album banner" in admin_source and "Soundtrack banner" in admin_source, "Album and soundtrack banner upload controls are missing."
+          app_source = Path("src/App.tsx").read_text(encoding="utf-8")
+          assert "albumBannerUrl" in app_source and "bannerUrl" in app_source, "Public listener views must consume track and album banners."
           assert "reconcileLegacyKvMedia" in api_source, "Legacy KV media inventory reconciliation is missing."
           assert "Isolated Preview demo (no D1 connection)" in api_source, "Preview must provide safe demo API responses without production bindings."
 
