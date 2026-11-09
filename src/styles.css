@@ -2519,3 +2519,21 @@ button:disabled {
 .now-playing-canvas-copy strong{overflow:hidden;color:#f6fff7;font-size:18px;text-overflow:ellipsis;white-space:nowrap}
 .now-playing-canvas-copy span{overflow:hidden;color:#9ea9a1;font-size:12px;text-overflow:ellipsis;white-space:nowrap}
 @media(max-width:700px){.now-playing-canvas{gap:13px;margin-bottom:18px;padding:10px;border-radius:14px}.now-playing-canvas-video{flex-basis:82px;border-radius:10px}.now-playing-canvas-copy strong{font-size:15px}.now-playing-canvas-copy span{font-size:11px}}
+
+
+/* Optional album and individual soundtrack banners */
+.track-cover,
+.recent-cover,
+.player-cover {
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+}
+.track-cover img,
+.recent-cover img,
+.player-cover img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+}
