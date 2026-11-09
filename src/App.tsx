@@ -11,6 +11,8 @@ type Track = {
   plays: number;
   audioUrl: string | null;
   videoUrl: string | null;
+  bannerUrl: string | null;
+  albumBannerUrl: string | null;
 };
 type Playlist = { id: string; name: string; description: string | null; is_public: number };
 type User = { id: string; name: string; email: string };
@@ -26,6 +28,8 @@ const demoTrack: Track = {
   plays: 1280,
   audioUrl: null,
   videoUrl: null,
+  bannerUrl: null,
+  albumBannerUrl: null,
 };
 
 const collections = [
@@ -71,6 +75,8 @@ function asTrack(row: Record<string, unknown>): Track {
       ? row.audio_path
       : (typeof row.external_audio_url === 'string' && /^https:\/\//i.test(row.external_audio_url) ? row.external_audio_url : null),
     videoUrl: typeof row.video_path === 'string' && row.video_path.startsWith('/media/') ? row.video_path : null,
+    bannerUrl: typeof row.banner_url === 'string' && row.banner_url.startsWith('/media/') ? row.banner_url : null,
+    albumBannerUrl: typeof row.album_banner_url === 'string' && row.album_banner_url.startsWith('/media/') ? row.album_banner_url : null,
   };
 }
 
@@ -676,7 +682,7 @@ export default function App() {
                   <div className="recent-grid">
                     {recentTracks.slice(0, 5).map((track, index) => (
                       <button className="recent-card" key={track.id} onClick={() => chooseTrack(track)}>
-                        <span className={'recent-cover recent-cover-' + (index % 5)}><Icon name="music" size={25} /></span>
+                        <span className={'recent-cover recent-cover-' + (index % 5)} style={(track.bannerUrl || track.albumBannerUrl) ? { backgroundImage: 'url("' + (track.bannerUrl || track.albumBannerUrl) + '")' } : undefined}>{!(track.bannerUrl || track.albumBannerUrl) && <Icon name="music" size={25} />}</span>
                         <strong>{track.title}</strong>
                         <small>{track.artist}</small>
                       </button>
@@ -852,7 +858,7 @@ export default function App() {
 
       <footer className="player">
         <div className="now-playing">
-          <div className="player-cover"><Icon name="music" size={22} /></div>
+          <div className="player-cover" style={(active?.bannerUrl || active?.albumBannerUrl) ? { backgroundImage: 'url("' + (active.bannerUrl || active.albumBannerUrl) + '")' } : undefined}>{!(active?.bannerUrl || active?.albumBannerUrl) && <Icon name="music" size={22} />}</div>
           <div className="now-playing-copy"><strong>{active?.title ?? 'Choose a track'}</strong><small>{active?.artist ?? 'DeanMusic Originals'}</small></div>
           <button className={active && liked.includes(active.id) ? 'heart-button liked' : 'heart-button'} aria-label="Like current track" onClick={() => active && void toggleLike(active.id)}><Icon name="heart" size={22} /></button>
         </div>
@@ -981,7 +987,7 @@ function TrackList({
         <div className={active?.id === track.id ? 'track-line current' : 'track-line'} key={track.id}>
           <span className="track-index">{active?.id === track.id && playing ? <span className="playing-bars">▮▮▮</span> : String(index + 1).padStart(2, '0')}</span>
           <button className="track-info" onClick={() => onChoose(track)}>
-            <span className="track-cover"><Icon name="music" size={20} /></span>
+            <span className="track-cover" style={(track.bannerUrl || track.albumBannerUrl) ? { backgroundImage: 'url("' + (track.bannerUrl || track.albumBannerUrl) + '")' } : undefined}>{!(track.bannerUrl || track.albumBannerUrl) && <Icon name="music" size={20} />}</span>
             <span className="track-copy"><b>{track.title}</b><small>{track.artist}</small></span>
           </button>
           <span className="track-album">{track.album}</span>
