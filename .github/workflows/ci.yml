@@ -82,7 +82,7 @@ jobs:
           assert media_route_path.exists(), "Dedicated /media/:id Pages Function route is missing."
           media_route = media_route_path.read_text(encoding="utf-8")
           assert "parseByteRange" in media_route and "status: 206" in media_route, "Dedicated media route must support HTTP byte-range streaming."
-          assert "env.MEDIA.getWithMetadata" in media_route, "Dedicated media route must serve existing KV objects."
+          assert "getWithMetadata" in media_route and "MEDIA?: KVNamespace" in media_route, "Dedicated media route must serve existing KV objects."
           assert "env.MEDIA_R2" in media_route, "Dedicated media route must preserve optional R2 compatibility."
           assert "Content-Range" in media_route and "Accept-Ranges" in media_route, "Media route must return byte range headers for audio seeking."
           assert "ALTER TABLE tracks ADD COLUMN video_path TEXT" in api_source, "Idempotent Canvas video_path schema recovery is missing."
