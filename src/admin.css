@@ -106,3 +106,7 @@
 @media(max-width:700px){.admin-storage-heading{align-items:flex-start;flex-direction:column}.admin-selected-files{max-height:180px;overflow:auto}}
 
 .admin-storage-warning{margin:10px 0!important;padding:10px 12px;border:1px solid rgba(255,185,74,.35);border-radius:9px;background:rgba(255,172,55,.08);color:#ffd28a!important;font-size:11px!important}
+
+
+.admin-album-banner{width:96px;height:42px;flex:0 0 auto;overflow:hidden;border:1px solid #354039;border-radius:7px;background:#101611}
+.admin-album-banner img{display:block;width:100%;height:100%;object-fit:cover}
