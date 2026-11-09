@@ -29,6 +29,8 @@ jobs:
         run: |
           mkdir -p .wrangler
           npx wrangler pages functions build functions --outdir .wrangler/functions --output-config-path .wrangler/config.json
+      - name: Syntax-check guarded Production migration runner
+        run: node --check .github/scripts/apply-production-banner-migration.mjs
       - name: Validate all D1 migrations
         run: |
           python3 - <<'PY'
@@ -124,5 +126,9 @@ jobs:
 
           track = db.execute("SELECT title, audio_path FROM tracks WHERE id='demo-midnight'").fetchone()
           assert track == ("Midnight Reverie", "browser-synth"), track
+          migration_runner = Path(".github/scripts/apply-production-banner-migration.mjs").read_text(encoding="utf-8")
+          assert "PRE-FLIGHT STOP" in migration_runner and "missingIndexes" in migration_runner, "Production banner migration runner must stop on incomplete baseline schema."
+          assert "ALTER TABLE albums ADD COLUMN banner_url TEXT" in migration_runner and "ALTER TABLE tracks ADD COLUMN banner_url TEXT" in migration_runner, "Production runner must add both banner columns."
+          assert "0005_album_track_banners.sql" in migration_runner, "Production runner must record migration 0005."
           print("All D1 migrations passed SQLite validation; Admin, media inventory, Canvas, and demo catalog checks passed.")
           PY
