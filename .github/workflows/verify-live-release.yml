@@ -1,0 +1,109 @@
+name: DeanMusic live release verification
+
+on:
+  push:
+    branches:
+      - release/artist-banners-canvas-behavior-20261109
+    paths:
+      - .github/ops/verify-live-release.txt
+
+permissions:
+  contents: read
+
+jobs:
+  verify-production:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - name: Verify live Production app, catalog, audio, and Canvas
+        run: |
+          node --input-type=module <<'NODE'
+          const base = 'https://deanmusic.pages.dev';
+          const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+          async function getJson(url) {
+            const response = await fetch(url, { cache: 'no-store' });
+            if (!response.ok) throw new Error('GET ' + url + ' returned HTTP ' + response.status);
+            return response.json();
+          }
+
+          let html = null;
+          let catalog = null;
+          let track = null;
+          let scripts = [];
+          let matchedUiBundle = false;
+          let lastIssue = 'Deployment has not updated yet.';
+
+          for (let attempt = 1; attempt <= 36; attempt += 1) {
+            try {
+              const stamp = Date.now() + '-' + attempt;
+              const [page, data] = await Promise.all([
+                fetch(base + '/?release-check=' + stamp, { cache: 'no-store' }),
+                getJson(base + '/api/catalog?release-check=' + stamp)
+              ]);
+              if (!page.ok) throw new Error('Production homepage returned HTTP ' + page.status);
+              html = await page.text();
+              catalog = data;
+              track = (catalog.tracks ?? []).find((item) =>
+                typeof item.audio_path === 'string' &&
+                typeof item.video_path === 'string'
+              );
+              if (!track) throw new Error('No published track currently has both audio and Canvas media.');
+              if (!Object.prototype.hasOwnProperty.call(track, 'banner_url') ||
+                  !Object.prototype.hasOwnProperty.call(track, 'album_banner_url')) {
+                throw new Error('Live catalog has not exposed the new soundtrack/album banner fields yet.');
+              }
+              scripts = [...html.matchAll(/<script[^>]+src=["']([^"']+)["']/g)].map((match) => match[1]);
+              const jsAssets = scripts.filter((src) => /\\.js(?:\\?|$)/i.test(src));
+              const jsBodies = await Promise.all(jsAssets.map(async (src) => {
+                const url = new URL(src, base).toString();
+                const response = await fetch(url, { cache: 'no-store' });
+                return response.ok ? response.text() : '';
+              }));
+              matchedUiBundle = jsBodies.some((body) =>
+                body.includes('Soundtrack banner') &&
+                body.includes('Album banner') &&
+                body.includes('Artist name') &&
+                body.includes('Publish immediately')
+              );
+              if (!matchedUiBundle) throw new Error('Live JavaScript bundle does not yet contain the new Admin Centre banner and artist controls.');
+              console.log('Production UI and catalog updated on attempt ' + attempt + '.');
+              break;
+            } catch (error) {
+              lastIssue = error instanceof Error ? error.message : String(error);
+              if (attempt === 36) throw new Error('Production release verification timed out: ' + lastIssue);
+              await pause(5000);
+            }
+          }
+
+          console.log('Published track:', track.title);
+          console.log('Artist:', track.artist_name);
+          console.log('Album:', track.album_title);
+          console.log('Soundtrack banner field:', track.banner_url ?? '(empty; upload optional)');
+          console.log('Album banner field:', track.album_banner_url ?? '(empty; upload optional)');
+          console.log('Live UI bundle includes Admin Centre banner/artist/publish fields.');
+
+          async function verifyMedia(kind, path, expectedPrefix) {
+            const url = new URL(path, base).toString();
+            const head = await fetch(url, { method: 'HEAD', cache: 'no-store' });
+            const contentType = (head.headers.get('content-type') ?? '').toLowerCase();
+            const size = Number(head.headers.get('content-length') ?? 0);
+            const ranges = (head.headers.get('accept-ranges') ?? '').toLowerCase();
+            console.log(kind + ' HEAD:', head.status, contentType, size + ' bytes', 'ranges=' + ranges);
+            if (head.status !== 200 || !contentType.startsWith(expectedPrefix) || size <= 0 || ranges !== 'bytes') {
+              throw new Error(kind + ' HEAD verification failed.');
+            }
+            const ranged = await fetch(url, { headers: { Range: 'bytes=0-1023' }, cache: 'no-store' });
+            const expectedLength = Math.min(1024, size);
+            const body = await ranged.arrayBuffer();
+            const expectedRange = 'bytes 0-' + (expectedLength - 1) + '/' + size;
+            if (ranged.status !== 206 || ranged.headers.get('content-range') !== expectedRange || body.byteLength !== expectedLength) {
+              throw new Error(kind + ' Range verification failed: HTTP ' + ranged.status + ', ' + ranged.headers.get('content-range') + ', body=' + body.byteLength);
+            }
+            console.log(kind + ' RANGE: 206', expectedRange, 'PASSED');
+          }
+
+          await verifyMedia('Audio', track.audio_path, 'audio/');
+          await verifyMedia('Canvas video', track.video_path, 'video/');
+          console.log('SUCCESS: Live Production app bundle, banner schema/API, audio streaming, and Canvas video streaming are verified.');
+          NODE
