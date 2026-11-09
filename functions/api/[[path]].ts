@@ -493,64 +493,6 @@ async function ensureMediaSchema(env: Env): Promise<void> {
   await env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_media_assets_provider_status ON media_assets(provider, status)').run();
 }
 
-async function reconcileLegacyKvMedia(
-  env: Env,
-  adminId: string,
-  cursor?: string
-): Promise<{ processed: number; imported: number; skipped: number; complete: boolean; cursor: string | null }> {
-  const page = await env.MEDIA.list({ prefix: 'media/', limit: 100, ...(cursor ? { cursor } : {}) });
-  let processed = 0;
-  let imported = 0;
-  let skipped = 0;
-
-  for (const key of page.keys) {
-    processed += 1;
-    const match = key.name.match(/^media\/([a-f0-9-]{36})$/i);
-    if (!match) {
-      skipped += 1;
-      continue;
-    }
-
-    let metadata = (key.metadata ?? null) as MediaMetadata | null;
-    let size = Number(metadata?.size ?? 0);
-    if (!Number.isFinite(size) || size <= 0 || !metadata?.contentType) {
-      const stored = await env.MEDIA.getWithMetadata<MediaMetadata>(key.name, 'arrayBuffer');
-      if (!stored.value) {
-        skipped += 1;
-        continue;
-      }
-      metadata = stored.metadata ?? metadata;
-      if (!Number.isFinite(size) || size <= 0) size = (stored.value as ArrayBuffer).byteLength;
-    }
-    if (!Number.isFinite(size) || size <= 0) {
-      skipped += 1;
-      continue;
-    }
-
-    const contentType = safeText(metadata?.contentType, 120) || 'application/octet-stream';
-    const fileName = safeText(metadata?.fileName, 120) || match[1];
-    const kind: 'audio' | 'image' | 'video' = contentType.startsWith('image/')
-      ? 'image'
-      : contentType.startsWith('video/') ? 'video' : 'audio';
-    const result = await env.DB.prepare(`
-      INSERT OR IGNORE INTO media_assets
-        (id, provider, object_key, media_kind, file_name, content_type, size_bytes, created_by, status)
-      VALUES (?, 'kv', ?, ?, ?, ?, ?, ?, 'ready')
-    `).bind(match[1], key.name, kind, fileName, contentType, Math.floor(size), adminId).run();
-    imported += Number(result.meta.changes ?? 0);
-    if (!result.meta.changes) skipped += 1;
-  }
-
-  return {
-    processed,
-    imported,
-    skipped,
-    complete: page.list_complete,
-    cursor: page.list_complete ? null : (page.cursor ?? null)
-  };
-}
-
-
 async function mediaUsage(env: Env, provider: 'r2' | 'kv'): Promise<number> {
   await ensureMediaSchema(env);
   const usage = await env.DB.prepare(
