@@ -84,6 +84,16 @@ if (!signalOne.length) {
 }
 const signalTrackRows = await query("SELECT COUNT(*) AS total FROM tracks WHERE album_id='signal-one'", "Counting Signal One tracks");
 const signalTrackCount = Number(signalTrackRows?.[0]?.total ?? 0);
+if (signalTrackCount <= 0) {
+  throw new Error("PRE-FLIGHT STOP: Signal One has no tracks, so the approved publication change cannot be verified. No writes were made.");
+}
+const indexRows = await query("SELECT name FROM sqlite_master WHERE type='index' AND name NOT LIKE 'sqlite_%'", "Reading Production indexes");
+const indexNames = new Set(indexRows.map((row) => String(row.name)));
+const expectedIndexes = ["session_userId_idx", "account_userId_idx", "account_provider_account_idx", "verification_identifier_idx", "idx_albums_artist_id", "idx_albums_public", "idx_tracks_artist_id", "idx_tracks_album_id", "idx_tracks_published_plays", "idx_playlists_owner_id", "idx_playlist_tracks_order", "idx_playlists_public", "idx_recently_played_user_time", "idx_media_assets_provider_status"];
+const missingIndexes = expectedIndexes.filter((name) => !indexNames.has(name));
+if (missingIndexes.length) {
+  throw new Error("PRE-FLIGHT STOP: Production is missing expected baseline indexes: " + missingIndexes.join(", ") + ". No writes were made.");
+}
 
 const knownMigrations = [
   "0001_init.sql",
