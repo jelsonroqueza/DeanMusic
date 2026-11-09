@@ -35,7 +35,7 @@ type UserRecord = { id: string; name: string; email: string };
 const AUDIO_TYPES = new Set(['audio/mpeg', 'audio/mp4', 'audio/aac', 'audio/ogg', 'audio/wav', 'audio/x-wav', 'audio/webm']);
 const IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
 const VIDEO_TYPES = new Set(['video/mp4', 'video/webm']);
-const MAX_AUDIO_BYTES = 20 * 1024 * 1024;
+const MAX_AUDIO_BYTES = 24 * 1024 * 1024;
 const MAX_IMAGE_BYTES = 2 * 1024 * 1024;
 const MAX_VIDEO_BYTES = 25 * 1024 * 1024;
 const R2_STORAGE_LIMIT_BYTES = 100_000_000_000;
@@ -608,7 +608,7 @@ async function uploadMedia(request: Request, env: Env, admin: UserRecord): Promi
         ? 'Cover images must be 2 MB or smaller.'
         : kind === 'video'
           ? 'Music videos must be 25 MB or smaller.'
-          : 'Audio files must be 20 MB or smaller.'
+          : 'Audio files must be 24 MiB or smaller.'
     }, 413);
   }
   if (kind === 'video') {
