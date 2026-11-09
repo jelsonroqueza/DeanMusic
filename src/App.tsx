@@ -611,6 +611,19 @@ export default function App() {
 
         <main className="main-panel">
           <div className="content">
+            {active && (active.bannerUrl || active.albumBannerUrl) && !active.videoUrl && page !== 'admin' && (
+              <section
+                className="now-playing-banner"
+                aria-label={'Banner artwork for ' + active.title}
+                style={{ backgroundImage: 'linear-gradient(90deg, rgba(0,0,0,.86) 0%, rgba(0,0,0,.52) 48%, rgba(0,0,0,.08) 100%), url("' + (active.bannerUrl || active.albumBannerUrl) + '")' }}
+              >
+                <div className="now-playing-banner-copy">
+                  <small>{active.bannerUrl ? 'SOUNDTRACK BANNER' : 'ALBUM BANNER'}</small>
+                  <h2>{active.title}</h2>
+                  <span>{active.artist} · {active.album}</span>
+                </div>
+              </section>
+            )}
             {active?.videoUrl && page !== 'admin' && (
               <section className="now-playing-canvas" aria-label="Now playing music video">
                 <div className="now-playing-canvas-video">
