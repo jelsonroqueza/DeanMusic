@@ -107,3 +107,56 @@ jobs:
           await verifyMedia('Canvas video', track.video_path, 'video/');
           console.log('SUCCESS: Live Production app bundle, banner schema/API, audio streaming, and Canvas video streaming are verified.');
           NODE
+
+      - name: Install Chromium for real browser Canvas verification
+        run: |
+          npm install --no-save --no-package-lock playwright
+          npx playwright install --with-deps chromium
+
+      - name: Verify Canvas opens and plays after selecting the live song
+        run: |
+          node --input-type=module <<'NODE'
+          import { chromium } from 'playwright';
+
+          const browser = await chromium.launch({ headless: true });
+          try {
+            const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+            const pageErrors = [];
+            page.on('pageerror', (error) => pageErrors.push(error.message));
+
+            await page.goto('https://deanmusic.pages.dev/', { waitUntil: 'domcontentloaded' });
+            await page.locator('.nav-link').filter({ hasText: 'Browse' }).first().click();
+            await page.locator('.track-list').waitFor({ state: 'visible', timeout: 15000 });
+
+            const trackRow = page.locator('.track-line').filter({ hasText: 'Ako ba o ikaw ang nagkulang?' }).first();
+            await trackRow.waitFor({ state: 'visible', timeout: 15000 });
+            await trackRow.locator('button.track-info').click();
+
+            await page.waitForFunction(() => {
+              const video = document.querySelector('.now-playing-canvas-video video');
+              return Boolean(video && video.readyState >= 2 && video.videoWidth > 0 && video.videoHeight > 0 && !video.paused);
+            }, { timeout: 20000 });
+
+            const videoState = await page.locator('.now-playing-canvas-video video').evaluate((video) => ({
+              currentSrc: video.currentSrc,
+              readyState: video.readyState,
+              networkState: video.networkState,
+              width: video.videoWidth,
+              height: video.videoHeight,
+              duration: video.duration,
+              currentTime: video.currentTime,
+              paused: video.paused,
+              error: video.error ? { code: video.error.code, message: video.error.message } : null
+            }));
+
+            if (pageErrors.length) throw new Error('Browser page errors: ' + pageErrors.join(' | '));
+            if (videoState.paused || !videoState.width || !videoState.height) {
+              throw new Error('Canvas did not start decoding and playing: ' + JSON.stringify(videoState));
+            }
+
+            console.log('CANVAS PLAYBACK PASSED:', JSON.stringify(videoState));
+            console.log('SUCCESS: Selecting the published song opens and plays its Canvas video in Chromium.');
+          } finally {
+            await browser.close();
+          }
+          NODE
