@@ -36,12 +36,13 @@ In the DeanMusic Pages project, open Settings > Variables and Secrets. Configure
 
 - `BETTER_AUTH_SECRET`: encrypted secret, at least 32 random characters. Generate a new random value and keep it private.
 - `APP_ORIGIN`: the exact origin of this Pages website, for example `https://deanmusic.pages.dev`.
+- Production-only encrypted secret `ADMIN_BOOTSTRAP_SHA256`: SHA-256 hex digest of the new one-time activation token. Do not put this value in `wrangler.toml`, GitHub, or client-side variables. Preview does not need this secret because admin activation is disabled there.
 
 Never put these values in a `VITE_` variable, GitHub file, frontend code, or chat. Never share the Better Auth secret.
 
 ## 4. Administrator provisioning
 
-Admin privileges are granted only to an authenticated account whose user ID is explicitly present in the DeanMusic D1 `admins` table. Do not use an email allowlist while email verification is disabled. The first administrator can be provisioned once using the short-lived activation flow in the account Profile page. The token hash, approved email, and expiry are configured only in Production variables; the plain one-time token is not stored in the repository. Production explicitly re-declares the DeanMusic D1 (`DB`) and KV (`MEDIA`) bindings because named Cloudflare environments do not inherit top-level bindings. Preview builds set `ADMIN_ACCESS_DISABLED = "true"` and intentionally have no D1, KV, or R2 bindings until separate staging resources exist; keep Preview read-only and do not point it at production data. The API can use an optional `MEDIA_R2` binding when a dedicated production bucket is provisioned; until then it falls back to the existing KV namespace.
+Admin privileges are granted only to an authenticated account whose user ID is explicitly present in the DeanMusic D1 `admins` table. Do not use an email allowlist while email verification is disabled. The first administrator can be provisioned once using the short-lived activation flow in the account Profile page. The approved email and expiry are plain Production variables; the SHA-256 verifier must be an encrypted Production secret named `ADMIN_BOOTSTRAP_SHA256`. Never store the verifier in the repository. The API requires a token derived from at least 32 cryptographically random bytes and applies a five-attempt, 15-minute per-account lockout. Because the previous verifier was committed in a public repository, generate a new token and verifier before activating the first administrator; do not reuse the previous code. Production explicitly re-declares the DeanMusic D1 (`DB`) and KV (`MEDIA`) bindings because named Cloudflare environments do not inherit top-level bindings. Preview builds set `ADMIN_ACCESS_DISABLED = "true"` and intentionally have no D1, KV, or R2 bindings until separate staging resources exist; keep Preview read-only and do not point it at production data. The API can use an optional `MEDIA_R2` binding when a dedicated production bucket is provisioned; until then it falls back to the existing KV namespace.
 
 ## 5. Apply the D1 migrations
 
@@ -53,9 +54,19 @@ npx wrangler login
 npx wrangler d1 migrations apply deanmusic-db --remote
 ```
 
-Wrangler reads all versioned SQL migrations from `cloudflare/migrations` as configured in `wrangler.toml`. Review the target database name before confirming. This applies the base schema (`0001_init.sql`) and the Admin Centre schema (`0002_public_albums_admin.sql`) in order. The first valid owner activation also has a narrowly scoped schema-recovery step if migration `0002` was missed.
+Wrangler reads all versioned SQL migrations from `cloudflare/migrations` as configured in `wrangler.toml`. Review the target database name before confirming. This applies all versioned migrations in order, including the media inventory (`0003_media_assets_canvas.sql`) and administrator activation lockout (`0004_admin_activation_attempts.sql`). The first valid owner activation also has a narrowly scoped schema-recovery step if migration `0002` was missed.
 
-## 6. Optional R2 media storage (requires separate billing approval)
+## 6. Generate a new first-admin activation token
+
+Generate a fresh 32-byte random token and its SHA-256 verifier on a trusted local machine. Keep the token private for entry in the DeanMusic Profile activation form, and add only the verifier as the encrypted Production secret `ADMIN_BOOTSTRAP_SHA256`.
+
+```bash
+node -e "const c=require('node:crypto'); const token=c.randomBytes(32).toString('base64url'); console.log('ONE-TIME TOKEN:', token); console.log('SHA-256 VERIFIER:', c.createHash('sha256').update(token).digest('hex'));"
+```
+
+Do not paste either value into GitHub, source files, or public chat. Set the verifier in Cloudflare Pages > DeanMusic > Settings > Variables and Secrets > Production > Add secret. This step is not performed by PR #7 or by Preview deployment.
+
+## 7. Optional R2 media storage (requires separate billing approval)
 
 R2 is not enabled by this repository's current configuration. Do not create a bucket, add a payment method, or add this binding without Dean's separate approval of the paid R2 setup.
 
@@ -69,7 +80,7 @@ bucket_name = "deanmusic-media"
 
 Do not add an R2 binding under Preview. The DeanMusic API enforces an application-level 80 GB warning and 100 GB upload ceiling. That is not a Cloudflare billing cap: R2 request operations and usage outside the DeanMusic application can still incur charges. Cloudflare budget alerts are notifications and do not stop usage automatically.
 
-## 7. Verify
+## 8. Verify
 
 After the next deployment, check:
 
