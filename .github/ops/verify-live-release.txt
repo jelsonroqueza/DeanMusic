@@ -1,1 +1,1 @@
-Re-run read-only production verification with corrected JavaScript asset matching.
+Run full public Production verification including an actual Chromium Canvas playback test.
