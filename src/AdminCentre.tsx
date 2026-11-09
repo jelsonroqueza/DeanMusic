@@ -175,6 +175,10 @@ export function AdminCentre({ onExit, onNotice, previewOnly = false }: { onExit:
     provider: string; r2Connected: boolean; usedBytes: number; limitBytes: number;
     warningBytes: number; percentUsed: number; canUpload: boolean;
   } | null>(null);
+  const [reconcilingLegacyMedia, setReconcilingLegacyMedia] = useState(false);
+  const [legacyMediaCursor, setLegacyMediaCursor] = useState<string | undefined>(undefined);
+  const [legacyMediaScanComplete, setLegacyMediaScanComplete] = useState(false);
+  const [legacyMediaScanStatus, setLegacyMediaScanStatus] = useState('');
 
   const [editingTrack, setEditingTrack] = useState<Track | null>(null);
   const [editTitle, setEditTitle] = useState('');
@@ -212,6 +216,56 @@ export function AdminCentre({ onExit, onNotice, previewOnly = false }: { onExit:
   };
 
   useEffect(() => { void loadData(); }, [previewOnly]);
+
+  const reconcileLegacyMedia = async () => {
+    if (previewOnly || reconcilingLegacyMedia || legacyMediaScanComplete) return;
+    setReconcilingLegacyMedia(true);
+    setError('');
+    let cursor = legacyMediaCursor;
+    let scanned = 0;
+    let imported = 0;
+    let pages = 0;
+    let complete = false;
+
+    try {
+      while (!complete && pages < 10) {
+        const result = await adminApi<{
+          processed: number;
+          imported: number;
+          skipped: number;
+          complete: boolean;
+          cursor: string | null;
+        }>('/api/admin/media/reconcile', {
+          method: 'POST',
+          body: JSON.stringify({ cursor }),
+        });
+        scanned += result.processed;
+        imported += result.imported;
+        complete = result.complete;
+        cursor = result.cursor ?? undefined;
+        pages += 1;
+        setLegacyMediaScanStatus(
+          'Scanned ' + scanned.toLocaleString() + ' legacy KV objects in this batch; ' +
+          imported.toLocaleString() + ' inventory records added.'
+        );
+        if (!complete && !cursor) throw new Error('The KV scan returned an incomplete page without a continuation cursor.');
+      }
+
+      setLegacyMediaCursor(complete ? undefined : cursor);
+      setLegacyMediaScanComplete(complete);
+      await loadData();
+      setLegacyMediaScanStatus(
+        complete
+          ? 'Legacy KV scan complete. ' + scanned.toLocaleString() + ' objects checked; ' + imported.toLocaleString() + ' inventory records added.'
+          : 'Batch complete: ' + scanned.toLocaleString() + ' objects checked; ' + imported.toLocaleString() + ' records added. Select Continue to scan the next batch.'
+      );
+      if (complete) onNotice('Legacy KV storage inventory reconciliation is complete.');
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Could not reconcile older KV uploads.');
+    } finally {
+      setReconcilingLegacyMedia(false);
+    }
+  };
 
   const publishedAlbums = albums.filter((album) => album.is_published === 1).length;
   const publishedTracks = tracks.filter((track) => track.is_published === 1).length;
@@ -542,7 +596,26 @@ export function AdminCentre({ onExit, onNotice, previewOnly = false }: { onExit:
             <div className="admin-storage-bar"><span style={{ width: (storageUsage?.percentUsed ?? 0) + '%' }} /></div>
             <div className="admin-storage-summary"><span>{formatBytes(storageUsage?.usedBytes ?? 0)} used of {formatBytes(storageUsage?.limitBytes ?? 0)}</span><strong>{(storageUsage?.percentUsed ?? 0).toFixed(1)}%</strong></div>
             {storageUsage && storageUsage.usedBytes >= storageUsage.warningBytes && <p className="admin-storage-warning" role="status">Storage warning: {(storageUsage.warningBytes / (1024 * 1024 * 1024)).toFixed(1)} GB warning threshold reached. New uploads will stop at the configured limit.</p>}
+
             <p>{storageUsage?.r2Connected ? 'Warning at 80 GB. New uploads are blocked at the 100 GB app storage ceiling.' : 'R2 target: 100 GB app ceiling, 80 GB warning. Current KV fallback is limited to its 1 GB app ceiling. No automatic billing or upgrade is enabled.'}</p>
+            {!storageUsage?.r2Connected && <>
+              <p>Older KV uploads made before the media inventory was introduced are not counted until they are scanned. This scan only adds inventory records; it does not move, edit, or delete media files.</p>
+              <button
+                type="button"
+                className="admin-secondary-button"
+                onClick={() => void reconcileLegacyMedia()}
+                disabled={reconcilingLegacyMedia || legacyMediaScanComplete || busy}
+              >
+                {reconcilingLegacyMedia
+                  ? 'Scanning legacy KV files…'
+                  : legacyMediaScanComplete
+                    ? 'Legacy KV scan complete'
+                    : legacyMediaCursor
+                      ? 'Continue legacy KV scan'
+                      : 'Scan existing KV uploads'}
+              </button>
+              {legacyMediaScanStatus && <p className="admin-upload-progress" role="status">{legacyMediaScanStatus}</p>}
+            </>}
           </div>}
           <div className="admin-rights-note">Only upload music and artwork you own or have permission to distribute and stream.</div>
         </>
