@@ -1,0 +1,69 @@
+name: DeanMusic live Canvas video diagnostic
+
+on:
+  push:
+    branches:
+      - diag/canvas-video-production-20261109
+
+permissions:
+  contents: read
+
+jobs:
+  inspect-live-canvas:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Install ffmpeg and ffprobe
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg
+
+      - name: Fetch and inspect the currently published Canvas video
+        run: |
+          node --input-type=module <<'NODE'
+          import { writeFile } from 'node:fs/promises';
+
+          const base = 'https://deanmusic.pages.dev';
+          const response = await fetch(base + '/api/catalog?canvas-diagnostic=' + Date.now(), { cache: 'no-store' });
+          if (!response.ok) throw new Error('Catalog returned HTTP ' + response.status);
+          const catalog = await response.json();
+          const track = (catalog.tracks ?? []).find((item) =>
+            typeof item.video_path === 'string' &&
+            item.video_path.startsWith('/media/') &&
+            /^[a-f0-9-]{36}$/i.test(item.video_path.slice('/media/'.length))
+          );
+          if (!track) throw new Error('No published Canvas video path found in production catalog.');
+
+          const url = new URL(track.video_path, base).toString();
+          console.log('Track:', track.title);
+          console.log('Video URL:', url);
+
+          const head = await fetch(url, { method: 'HEAD', cache: 'no-store' });
+          const contentType = head.headers.get('content-type') ?? '';
+          const size = Number(head.headers.get('content-length') ?? 0);
+          const ranges = head.headers.get('accept-ranges') ?? '';
+          console.log('HEAD:', head.status, 'Content-Type:', contentType, 'Size:', size, 'Accept-Ranges:', ranges);
+          if (head.status !== 200 || !contentType.toLowerCase().startsWith('video/') || size <= 0) {
+            throw new Error('Video media route did not return a valid video object.');
+          }
+
+          const range = await fetch(url, { headers: { Range: 'bytes=0-1023' }, cache: 'no-store' });
+          console.log('RANGE:', range.status, range.headers.get('content-range'), range.headers.get('content-type'));
+          if (range.status !== 206) throw new Error('Video range request did not return HTTP 206.');
+          const rangeBody = await range.arrayBuffer();
+          if (rangeBody.byteLength !== Math.min(1024, size)) throw new Error('Unexpected byte-range body size.');
+
+          const full = await fetch(url, { cache: 'no-store' });
+          if (!full.ok) throw new Error('Full video GET returned HTTP ' + full.status);
+          const bytes = Buffer.from(await full.arrayBuffer());
+          if (bytes.length !== size) throw new Error('Downloaded size mismatch: ' + bytes.length + ' vs ' + size);
+          console.log('Downloaded video bytes:', bytes.length);
+          console.log('First 32 bytes:', bytes.subarray(0, 32).toString('hex'));
+          await writeFile(process.env.RUNNER_TEMP + '/canvas-video.bin', bytes);
+          NODE
+
+      - name: Inspect video codec, dimensions, and duration
+        run: |
+          ffprobe -v error -show_streams -show_format -of json "$RUNNER_TEMP/canvas-video.bin" | tee "$RUNNER_TEMP/canvas-ffprobe.json"
+          ffmpeg -v error -i "$RUNNER_TEMP/canvas-video.bin" -f null -
+          echo "FULL DECODE PASSED"
