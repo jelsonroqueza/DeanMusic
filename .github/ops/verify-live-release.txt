@@ -1,1 +1,1 @@
-Run read-only Production verification for the approved DeanMusic release.
+Re-run read-only production verification with corrected JavaScript asset matching.
