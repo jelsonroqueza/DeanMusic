@@ -190,7 +190,7 @@ export function AdminCentre({ onExit, onNotice, previewOnly = false }: { onExit:
 
   const [editingTrack, setEditingTrack] = useState<Track | null>(null);
   const [editTitle, setEditTitle] = useState('');
-  const [editArtistName, setEditArtistName] = useState('');
+  const [editTrackArtistName, setEditArtistName] = useState('');
   const [editBannerFile, setEditBannerFile] = useState<File | null>(null);
   const [removeExistingBanner, setRemoveExistingBanner] = useState(false);
   const [editGenre, setEditGenre] = useState('');
@@ -473,7 +473,7 @@ export function AdminCentre({ onExit, onNotice, previewOnly = false }: { onExit:
         method: 'PATCH',
         body: JSON.stringify({
           title: editAlbumTitle.trim(),
-          artistName: editArtistName.trim(),
+          artistName: editTrackArtistName.trim(),
           genre: editAlbumGenre.trim(),
           description: editAlbumDescription.trim(),
           releaseDate: editReleaseDate,
@@ -561,7 +561,7 @@ export function AdminCentre({ onExit, onNotice, previewOnly = false }: { onExit:
           method: 'PATCH',
           body: JSON.stringify({
             title: editTitle.trim(),
-            artistName: editArtistName.trim(),
+            artistName: editTrackArtistName.trim(),
             genre: editGenre.trim(),
             trackNumber: Number(editNumber),
             duration: Number(editDuration),
@@ -695,7 +695,7 @@ export function AdminCentre({ onExit, onNotice, previewOnly = false }: { onExit:
                 <div><strong>Edit album details</strong><button type="button" className="admin-text-button" onClick={() => setEditingAlbum(null)}>Cancel</button></div>
                 <div className="admin-form-row">
                   <label>Album title<input disabled={previewOnly || busy} value={editAlbumTitle} onChange={(event) => setEditAlbumTitle(event.target.value)} maxLength={120} required /></label>
-                  <label>Artist name<input disabled={previewOnly || busy} value={editArtistName} onChange={(event) => setEditArtistName(event.target.value)} maxLength={120} required /></label>
+                  <label>Artist name<input disabled={previewOnly || busy} value={editTrackArtistName} onChange={(event) => setEditArtistName(event.target.value)} maxLength={120} required /></label>
                   <label>Genre<input disabled={previewOnly || busy} value={editAlbumGenre} onChange={(event) => setEditAlbumGenre(event.target.value)} maxLength={60} /></label>
                   <label>Release date<input disabled={previewOnly || busy} type="date" value={editReleaseDate} onChange={(event) => setEditReleaseDate(event.target.value)} /></label>
                 </div>
@@ -755,7 +755,7 @@ export function AdminCentre({ onExit, onNotice, previewOnly = false }: { onExit:
                 <div><strong>Edit track details</strong><button type="button" className="admin-text-button" onClick={() => setEditingTrack(null)}>Cancel</button></div>
                 <div className="admin-form-row">
                   <label>Title<input disabled={previewOnly || busy} value={editTitle} onChange={(event) => setEditTitle(event.target.value)} required maxLength={120} /></label>
-                  <label>Artist name<input disabled={previewOnly || busy} value={editArtistName} onChange={(event) => setEditArtistName(event.target.value)} required maxLength={120} /></label>
+                  <label>Artist name<input disabled={previewOnly || busy} value={editTrackArtistName} onChange={(event) => setEditArtistName(event.target.value)} required maxLength={120} /></label>
                   <label>Genre<input disabled={previewOnly || busy} value={editGenre} onChange={(event) => setEditGenre(event.target.value)} maxLength={60} /></label>
                   <label>Track number<input disabled={previewOnly || busy} type="number" min="1" step="1" value={editNumber} onChange={(event) => setEditNumber(event.target.value)} required /></label>
                   <label>Duration (seconds)<input disabled={previewOnly || busy} type="number" min="0" max="86400" value={editDuration} onChange={(event) => setEditDuration(event.target.value)} required /></label>
