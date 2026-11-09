@@ -2519,3 +2519,95 @@ button:disabled {
 .now-playing-canvas-copy strong{overflow:hidden;color:#f6fff7;font-size:18px;text-overflow:ellipsis;white-space:nowrap}
 .now-playing-canvas-copy span{overflow:hidden;color:#9ea9a1;font-size:12px;text-overflow:ellipsis;white-space:nowrap}
 @media(max-width:700px){.now-playing-canvas{gap:13px;margin-bottom:18px;padding:10px;border-radius:14px}.now-playing-canvas-video{flex-basis:82px;border-radius:10px}.now-playing-canvas-copy strong{font-size:15px}.now-playing-canvas-copy span{font-size:11px}}
+
+
+/* Optional album and individual soundtrack banners */
+.track-cover,
+.recent-cover,
+.player-cover {
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+}
+.track-cover img,
+.recent-cover img,
+.player-cover img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+}
+
+
+/* Wide public-facing album / solo soundtrack banner */
+.now-playing-banner {
+  position: relative;
+  min-height: clamp(190px, 25vw, 290px);
+  display: flex;
+  align-items: flex-end;
+  overflow: hidden;
+  margin: 0 0 28px;
+  padding: clamp(20px, 4vw, 42px);
+  border: 1px solid rgba(255,255,255,.14);
+  border-radius: 18px;
+  background-color: #141815;
+  background-position: center;
+  background-size: cover;
+  background-repeat: no-repeat;
+  box-shadow: 0 18px 42px rgba(0,0,0,.24), inset 0 1px 0 rgba(255,255,255,.06);
+}
+.now-playing-banner-copy {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  max-width: min(720px, 90%);
+  flex-direction: column;
+  gap: 8px;
+  text-shadow: 0 2px 18px rgba(0,0,0,.5);
+}
+.now-playing-banner-copy small {
+  color: #9bffa7;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 2px;
+}
+.now-playing-banner-copy h2 {
+  margin: 0;
+  color: #fff;
+  font-size: clamp(23px, 3.2vw, 42px);
+  line-height: 1.08;
+  letter-spacing: -1px;
+}
+.now-playing-banner-copy span {
+  color: rgba(255,255,255,.84);
+  font-size: 12px;
+}
+@media(max-width:700px) {
+  .now-playing-banner {
+    min-height: 170px;
+    margin-bottom: 20px;
+    padding: 20px;
+    border-radius: 13px;
+  }
+  .now-playing-banner-copy h2 { font-size: 26px; }
+}
+
+/* Make the selected vertical Canvas the primary visual surface. */
+.now-playing-canvas {
+  max-width: 940px;
+  gap: 22px;
+  padding: 18px;
+}
+.now-playing-canvas-video {
+  flex-basis: clamp(148px, 17vw, 200px);
+  aspect-ratio: 9 / 16;
+  box-shadow: 0 12px 28px rgba(0,0,0,.28);
+}
+.now-playing-canvas-video video {
+  background: #050706;
+  object-fit: contain;
+}
+@media(max-width:700px) {
+  .now-playing-canvas { gap: 13px; padding: 10px; }
+  .now-playing-canvas-video { flex-basis: 112px; }
+}

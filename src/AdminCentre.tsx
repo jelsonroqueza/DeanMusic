@@ -6,6 +6,7 @@ type Album = {
   title: string;
   description: string | null;
   cover_url: string | null;
+  banner_url: string | null;
   release_date: string | null;
   genre: string | null;
   is_published: number;
@@ -23,6 +24,7 @@ type Track = {
   genre: string | null;
   audio_path: string | null;
   video_path: string | null;
+  banner_url: string | null;
   is_published: number;
   plays_count: number;
   artist_name: string;
@@ -34,20 +36,20 @@ type ApiResult<T> = T;
 const previewAlbums: Album[] = [
   {
     id: 'preview-album-1', title: 'Gabi at Umaga', description: 'A sample OPM collection for the Admin Centre preview.',
-    cover_url: null, release_date: '2026-11-01', genre: 'OPM', is_published: 1,
+    cover_url: null, banner_url: null, release_date: '2026-11-01', genre: 'OPM', is_published: 1,
     created_at: '2026-11-01', artist_name: 'DeanMusic Originals', track_count: 4,
   },
   {
     id: 'preview-album-2', title: 'Midnight Drive', description: 'A sample electronic album shown in read-only preview mode.',
-    cover_url: null, release_date: '2026-11-06', genre: 'Electronic', is_published: 0,
+    cover_url: null, banner_url: null, release_date: '2026-11-06', genre: 'Electronic', is_published: 0,
     created_at: '2026-11-06', artist_name: 'DeanMusic Originals', track_count: 3,
   },
 ];
 
 const previewTracks: Track[] = [
-  { id: 'preview-track-1', album_id: 'preview-album-1', title: 'Bituin sa Dilim', duration_seconds: 214, track_number: 1, genre: 'OPM', audio_path: null, video_path: null, is_published: 1, plays_count: 1240, artist_name: 'DeanMusic Originals', album_title: 'Gabi at Umaga' },
-  { id: 'preview-track-2', album_id: 'preview-album-1', title: 'Sa Dulo ng Gabi', duration_seconds: 198, track_number: 2, genre: 'OPM', audio_path: null, video_path: null, is_published: 1, plays_count: 865, artist_name: 'DeanMusic Originals', album_title: 'Gabi at Umaga' },
-  { id: 'preview-track-3', album_id: 'preview-album-2', title: 'Neon Highway', duration_seconds: 232, track_number: 1, genre: 'Electronic', audio_path: null, video_path: null, is_published: 0, plays_count: 0, artist_name: 'DeanMusic Originals', album_title: 'Midnight Drive' },
+  { id: 'preview-track-1', album_id: 'preview-album-1', title: 'Bituin sa Dilim', duration_seconds: 214, track_number: 1, genre: 'OPM', audio_path: null, video_path: null, banner_url: null, is_published: 1, plays_count: 1240, artist_name: 'DeanMusic Originals', album_title: 'Gabi at Umaga' },
+  { id: 'preview-track-2', album_id: 'preview-album-1', title: 'Sa Dulo ng Gabi', duration_seconds: 198, track_number: 2, genre: 'OPM', audio_path: null, video_path: null, banner_url: null, is_published: 1, plays_count: 865, artist_name: 'DeanMusic Originals', album_title: 'Gabi at Umaga' },
+  { id: 'preview-track-3', album_id: 'preview-album-2', title: 'Neon Highway', duration_seconds: 232, track_number: 1, genre: 'Electronic', audio_path: null, video_path: null, banner_url: null, is_published: 0, plays_count: 0, artist_name: 'DeanMusic Originals', album_title: 'Midnight Drive' },
 ];
 
 
@@ -154,6 +156,7 @@ export function AdminCentre({ onExit, onNotice, previewOnly = false }: { onExit:
   const [albumDescription, setAlbumDescription] = useState('');
   const [releaseDate, setReleaseDate] = useState('');
   const [coverFile, setCoverFile] = useState<File | null>(null);
+  const [albumBannerFile, setAlbumBannerFile] = useState<File | null>(null);
 
   const [editingAlbum, setEditingAlbum] = useState<Album | null>(null);
   const [editAlbumTitle, setEditAlbumTitle] = useState('');
@@ -162,9 +165,14 @@ export function AdminCentre({ onExit, onNotice, previewOnly = false }: { onExit:
   const [editAlbumDescription, setEditAlbumDescription] = useState('');
   const [editReleaseDate, setEditReleaseDate] = useState('');
   const [editCoverFile, setEditCoverFile] = useState<File | null>(null);
+  const [editAlbumBannerFile, setEditAlbumBannerFile] = useState<File | null>(null);
+  const [removeExistingAlbumBanner, setRemoveExistingAlbumBanner] = useState(false);
 
   const [selectedAlbum, setSelectedAlbum] = useState('');
   const [trackTitle, setTrackTitle] = useState('');
+  const [trackArtistName, setTrackArtistName] = useState('');
+  const [trackBannerFile, setTrackBannerFile] = useState<File | null>(null);
+  const [publishImmediately, setPublishImmediately] = useState(true);
   const [trackGenre, setTrackGenre] = useState('');
   const [trackNumber, setTrackNumber] = useState('1');
   const [trackDuration, setTrackDuration] = useState('0');
@@ -182,6 +190,9 @@ export function AdminCentre({ onExit, onNotice, previewOnly = false }: { onExit:
 
   const [editingTrack, setEditingTrack] = useState<Track | null>(null);
   const [editTitle, setEditTitle] = useState('');
+  const [editTrackArtistName, setEditTrackArtistName] = useState('');
+  const [editBannerFile, setEditBannerFile] = useState<File | null>(null);
+  const [removeExistingBanner, setRemoveExistingBanner] = useState(false);
   const [editGenre, setEditGenre] = useState('');
   const [editNumber, setEditNumber] = useState('1');
   const [editDuration, setEditDuration] = useState('0');
@@ -195,6 +206,7 @@ export function AdminCentre({ onExit, onNotice, previewOnly = false }: { onExit:
       setTracks(previewTracks);
       setStorageUsage({ provider: 'Preview only', r2Connected: false, usedBytes: 0, limitBytes: 0, warningBytes: 0, percentUsed: 0, canUpload: false });
       setSelectedAlbum((current) => current || previewAlbums[0].id);
+      setTrackArtistName((current) => current || previewAlbums[0].artist_name);
       setLoading(false);
       return;
     }
@@ -208,6 +220,7 @@ export function AdminCentre({ onExit, onNotice, previewOnly = false }: { onExit:
       setTracks(trackResult.tracks);
       setStorageUsage(storageResult);
       setSelectedAlbum((current) => current || albumResult.albums[0]?.id || '');
+      setTrackArtistName((current) => current || albumResult.albums[0]?.artist_name || '');
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Could not load the music library.');
     } finally {
@@ -283,6 +296,7 @@ export function AdminCentre({ onExit, onNotice, previewOnly = false }: { onExit:
     setError('');
     try {
       const coverUrl = coverFile ? await uploadMedia(coverFile, 'image') : '';
+      const bannerUrl = albumBannerFile ? await uploadMedia(albumBannerFile, 'image') : '';
       await adminApi('/api/admin/albums', {
         method: 'POST',
         body: JSON.stringify({
@@ -292,6 +306,7 @@ export function AdminCentre({ onExit, onNotice, previewOnly = false }: { onExit:
           description: albumDescription.trim(),
           releaseDate,
           coverUrl,
+          bannerUrl,
         }),
       });
       setAlbumTitle('');
@@ -300,6 +315,7 @@ export function AdminCentre({ onExit, onNotice, previewOnly = false }: { onExit:
       setAlbumDescription('');
       setReleaseDate('');
       setCoverFile(null);
+      setAlbumBannerFile(null);
       await loadData();
       onNotice('Album saved as a draft. Publish it when it is ready.');
     } catch (cause) {
@@ -312,6 +328,7 @@ export function AdminCentre({ onExit, onNotice, previewOnly = false }: { onExit:
   const onAudioSelected = (event: ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(event.target.files ?? []);
     setAudioFiles(files);
+    setTrackBannerFile(null);
     setTrackTitle(files.length === 1 ? files[0].name.replace(/\.[^.]+$/, '') : '');
     setVideoFile(null);
     if (files.length === 1) {
@@ -352,21 +369,29 @@ export function AdminCentre({ onExit, onNotice, previewOnly = false }: { onExit:
         let audioPath = '';
         let createdTrackId = '';
         let unattachedVideoPath = '';
+        let unattachedBannerPath = '';
         try {
           const detectedDuration = await readMediaDuration(file, 'audio').catch(() => 0);
           const duration = audioFiles.length === 1 && Number(trackDuration) > 0
             ? Number(trackDuration)
             : Math.floor(detectedDuration);
           audioPath = await uploadMedia(file, 'audio');
+          if (audioFiles.length === 1 && trackBannerFile) {
+            setUploadProgress('Uploading soundtrack banner for ' + title);
+            unattachedBannerPath = await uploadMedia(trackBannerFile, 'image');
+          }
           const created = await adminApi<{ track: { id: string } }>('/api/admin/tracks', {
             method: 'POST',
             body: JSON.stringify({
               albumId: selectedAlbum,
               title,
+              artistName: trackArtistName.trim(),
               genre: trackGenre.trim(),
               duration,
               trackNumber: Number(trackNumber) + index,
               audioPath,
+              bannerUrl: unattachedBannerPath || undefined,
+              publishImmediately,
             }),
           });
           createdTrackId = created.track.id;
@@ -391,11 +416,16 @@ export function AdminCentre({ onExit, onNotice, previewOnly = false }: { onExit:
             const videoId = unattachedVideoPath.slice('/media/'.length);
             await adminApi('/api/admin/media/' + encodeURIComponent(videoId), { method: 'DELETE' }).catch(() => undefined);
           }
+          if (unattachedBannerPath && !createdTrackId) {
+            const bannerId = unattachedBannerPath.slice('/media/'.length);
+            await adminApi('/api/admin/media/' + encodeURIComponent(bannerId), { method: 'DELETE' }).catch(() => undefined);
+          }
           failures.push(file.name + ': ' + (cause instanceof Error ? cause.message : 'Upload failed.'));
         }
       }
       setAudioFiles([]);
       setVideoFile(null);
+      setTrackBannerFile(null);
       setTrackTitle('');
       setTrackGenre('');
       setTrackNumber(String(Math.max(1, Number(trackNumber) + completed.length)));
@@ -426,6 +456,8 @@ export function AdminCentre({ onExit, onNotice, previewOnly = false }: { onExit:
     setEditAlbumDescription(album.description ?? '');
     setEditReleaseDate(album.release_date ?? '');
     setEditCoverFile(null);
+    setEditAlbumBannerFile(null);
+    setRemoveExistingAlbumBanner(false);
   };
 
   const saveAlbumEdit = async (event: FormEvent<HTMLFormElement>) => {
@@ -436,6 +468,7 @@ export function AdminCentre({ onExit, onNotice, previewOnly = false }: { onExit:
     setError('');
     try {
       const coverUrl = editCoverFile ? await uploadMedia(editCoverFile, 'image') : (editingAlbum.cover_url ?? '');
+      const bannerUrl = editAlbumBannerFile ? await uploadMedia(editAlbumBannerFile, 'image') : removeExistingAlbumBanner ? null : undefined;
       await adminApi('/api/admin/albums/' + encodeURIComponent(editingAlbum.id), {
         method: 'PATCH',
         body: JSON.stringify({
@@ -445,9 +478,12 @@ export function AdminCentre({ onExit, onNotice, previewOnly = false }: { onExit:
           description: editAlbumDescription.trim(),
           releaseDate: editReleaseDate,
           coverUrl,
+          ...(bannerUrl !== undefined ? { bannerUrl } : {}),
         }),
       });
       setEditingAlbum(null);
+      setEditAlbumBannerFile(null);
+      setRemoveExistingAlbumBanner(false);
       await loadData();
       onNotice('Album details updated.');
     } catch (cause) {
@@ -492,6 +528,9 @@ export function AdminCentre({ onExit, onNotice, previewOnly = false }: { onExit:
   const beginEditTrack = (track: Track) => {
     setEditingTrack(track);
     setEditTitle(track.title);
+    setEditTrackArtistName(track.artist_name);
+    setEditBannerFile(null);
+    setRemoveExistingBanner(false);
     setEditGenre(track.genre ?? '');
     setEditNumber(String(track.track_number ?? 1));
     setEditDuration(String(track.duration_seconds ?? 0));
@@ -507,6 +546,9 @@ export function AdminCentre({ onExit, onNotice, previewOnly = false }: { onExit:
     setError('');
     try {
       let videoPath: string | null | undefined;
+      let bannerUrl: string | null | undefined;
+      if (editBannerFile) bannerUrl = await uploadMedia(editBannerFile, 'image');
+      else if (removeExistingBanner) bannerUrl = null;
       if (editVideoFile) {
         const videoInfo = await readCanvasVideoInfo(editVideoFile);
         validateCanvasVideo(videoInfo);
@@ -519,10 +561,12 @@ export function AdminCentre({ onExit, onNotice, previewOnly = false }: { onExit:
           method: 'PATCH',
           body: JSON.stringify({
             title: editTitle.trim(),
+            artistName: editTrackArtistName.trim(),
             genre: editGenre.trim(),
             trackNumber: Number(editNumber),
             duration: Number(editDuration),
             ...(videoPath !== undefined ? { videoPath } : {}),
+            ...(bannerUrl !== undefined ? { bannerUrl } : {}),
           }),
         });
       } catch (cause) {
@@ -530,11 +574,17 @@ export function AdminCentre({ onExit, onNotice, previewOnly = false }: { onExit:
           const mediaId = videoPath.slice('/media/'.length);
           await adminApi('/api/admin/media/' + encodeURIComponent(mediaId), { method: 'DELETE' }).catch(() => undefined);
         }
+        if (typeof bannerUrl === 'string') {
+          const mediaId = bannerUrl.slice('/media/'.length);
+          await adminApi('/api/admin/media/' + encodeURIComponent(mediaId), { method: 'DELETE' }).catch(() => undefined);
+        }
         throw cause;
       }
       setEditingTrack(null);
       setEditVideoFile(null);
       setRemoveExistingVideo(false);
+      setEditBannerFile(null);
+      setRemoveExistingBanner(false);
       await loadData();
       onNotice(videoPath === null ? 'Track updated and Canvas video removed.' : editVideoFile ? 'Track and Canvas video updated.' : 'Track details updated.');
     } catch (cause) {
@@ -631,8 +681,10 @@ export function AdminCentre({ onExit, onNotice, previewOnly = false }: { onExit:
               </div>
               <label>Description<textarea disabled={previewOnly || busy} value={albumDescription} onChange={(event) => setAlbumDescription(event.target.value)} maxLength={1000} rows={3} placeholder="Tell listeners about this album." /></label>
               <label>Release date<input disabled={previewOnly || busy} type="date" value={releaseDate} onChange={(event) => setReleaseDate(event.target.value)} /></label>
-              <label>Cover artwork <span className="admin-field-hint">JPG, PNG, or WebP · max 2 MB</span><input disabled={previewOnly || busy} type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => setCoverFile(event.target.files?.[0] ?? null)} /></label>
-              {coverFile && <p className="admin-file-name">Selected: {coverFile.name}</p>}
+              <label>Cover artwork <span className="admin-field-hint">Square artwork · JPG, PNG, or WebP · max 2 MB</span><input disabled={previewOnly || busy} type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => setCoverFile(event.target.files?.[0] ?? null)} /></label>
+              {coverFile && <p className="admin-file-name">Selected cover: {coverFile.name}</p>}
+              <label>Album banner <span className="admin-field-hint">Optional wide image · recommended 1600 × 600 · JPG, PNG, or WebP · max 2 MB</span><input disabled={previewOnly || busy} type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => setAlbumBannerFile(event.target.files?.[0] ?? null)} /></label>
+              {albumBannerFile && <p className="admin-file-name">Selected banner: {albumBannerFile.name}</p>}
               <button type="submit" className="admin-primary-button" disabled={previewOnly || busy}>{busy ? 'Saving…' : 'Create draft album'}</button>
             </form>
           </article>
@@ -648,7 +700,11 @@ export function AdminCentre({ onExit, onNotice, previewOnly = false }: { onExit:
                   <label>Release date<input disabled={previewOnly || busy} type="date" value={editReleaseDate} onChange={(event) => setEditReleaseDate(event.target.value)} /></label>
                 </div>
                 <label className="admin-edit-description">Description<textarea disabled={previewOnly || busy} value={editAlbumDescription} onChange={(event) => setEditAlbumDescription(event.target.value)} maxLength={1000} rows={2} /></label>
-                <label className="admin-edit-description">Replace cover artwork <span className="admin-field-hint">JPG, PNG, or WebP · max 2 MB</span><input disabled={previewOnly || busy} type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => setEditCoverFile(event.target.files?.[0] ?? null)} /></label>
+                <label className="admin-edit-description">Replace cover artwork <span className="admin-field-hint">Square artwork · JPG, PNG, or WebP · max 2 MB</span><input disabled={previewOnly || busy} type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => setEditCoverFile(event.target.files?.[0] ?? null)} /></label>
+                <label className="admin-edit-description">{editingAlbum.banner_url ? 'Replace album banner' : 'Add album banner'} <span className="admin-field-hint">Optional wide image · recommended 1600 × 600 · JPG, PNG, or WebP · max 2 MB</span><input disabled={previewOnly || busy} type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => setEditAlbumBannerFile(event.target.files?.[0] ?? null)} /></label>
+                {editingAlbum.banner_url && <p className="admin-file-name">Current album banner is attached.</p>}
+                {editAlbumBannerFile && <p className="admin-file-name">New banner: {editAlbumBannerFile.name}</p>}
+                {editingAlbum.banner_url && <label className="admin-check-row"><input type="checkbox" disabled={previewOnly || busy || Boolean(editAlbumBannerFile)} checked={removeExistingAlbumBanner} onChange={(event) => setRemoveExistingAlbumBanner(event.target.checked)} /> Remove current album banner when saving</label>}
                 <button type="submit" className="admin-primary-button" disabled={previewOnly || busy}>Save album details</button>
               </form>
             )}
@@ -657,6 +713,7 @@ export function AdminCentre({ onExit, onNotice, previewOnly = false }: { onExit:
               <article className="admin-album-row" key={album.id}>
                 <div className="admin-album-cover">{album.cover_url ? <img src={album.cover_url} alt="" /> : <span>♫</span>}</div>
                 <div className="admin-album-copy"><strong>{album.title}</strong><small>{album.artist_name} · {album.track_count} tracks · {album.genre || 'Uncategorized'}</small></div>
+                {album.banner_url && <span className="admin-album-banner"><img src={album.banner_url} alt={album.title + ' banner'} /></span>}
                 <span className={album.is_published === 1 ? 'admin-pill published' : 'admin-pill draft'}>{album.is_published === 1 ? 'Published' : 'Draft'}</span>
                 <button type="button" className="admin-text-button" disabled={previewOnly || busy} onClick={() => beginEditAlbum(album)}>Edit</button>
                 <button type="button" className="admin-secondary-button" disabled={previewOnly || busy} onClick={() => void toggleAlbumPublish(album)}>{album.is_published === 1 ? 'Unpublish' : 'Publish'}</button>
@@ -670,15 +727,19 @@ export function AdminCentre({ onExit, onNotice, previewOnly = false }: { onExit:
             <div className="admin-panel-heading"><div><h2>Upload a track</h2><p>Add an audio file to an existing album.</p></div></div>
             {!albums.length ? <div className="admin-empty">Create an album before uploading tracks.</div> : (
               <form onSubmit={submitTrack} className="admin-form">
-                <label>Album<select disabled={previewOnly || busy} value={selectedAlbum} onChange={(event) => setSelectedAlbum(event.target.value)} required>{albums.map((album) => <option key={album.id} value={album.id}>{album.title} — {album.artist_name}</option>)}</select></label>
+                <label>Album<select disabled={previewOnly || busy} value={selectedAlbum} onChange={(event) => { const nextAlbum = albums.find((album) => album.id === event.target.value); setSelectedAlbum(event.target.value); setTrackArtistName(nextAlbum?.artist_name ?? ''); }} required>{albums.map((album) => <option key={album.id} value={album.id}>{album.title} — {album.artist_name}</option>)}</select></label>
                 <label>Track title <span className="admin-field-hint">Optional for one file. Multiple uploads use each filename as its track title.</span><input disabled={previewOnly || busy || audioFiles.length > 1} value={trackTitle} onChange={(event) => setTrackTitle(event.target.value)} maxLength={120} placeholder="Optional custom title for one track" /></label>
+                <label>Artist name <span className="admin-field-hint">Saved on this individual soundtrack. Defaults to the selected album artist.</span><input disabled={previewOnly || busy} value={trackArtistName} onChange={(event) => setTrackArtistName(event.target.value)} maxLength={120} required placeholder="Enter soundtrack artist" /></label>
                 <div className="admin-form-row">
                   <label>Starting track number<input disabled={previewOnly || busy} type="number" min="1" step="1" value={trackNumber} onChange={(event) => setTrackNumber(event.target.value)} required /></label>
                   <label>Genre<input disabled={previewOnly || busy} value={trackGenre} onChange={(event) => setTrackGenre(event.target.value)} maxLength={60} placeholder="Leave blank to use album genre" /></label>
                 </div>
-                <label>Audio files <span className="admin-field-hint">MP3, M4A, AAC, OGG, WAV, or WebM · max 20 MB each · select multiple songs</span><input disabled={previewOnly || busy} id="admin-audio-file" type="file" multiple accept="audio/mpeg,audio/mp4,audio/aac,audio/ogg,audio/wav,audio/x-wav,audio/webm,.mp3,.m4a,.aac,.ogg,.wav,.webm" onChange={onAudioSelected} required /></label>
+                <label>Audio files <span className="admin-field-hint">MP3, M4A, AAC, OGG, WAV, or WebM · max 24 MiB each · select multiple songs</span><input disabled={previewOnly || busy} id="admin-audio-file" type="file" multiple accept="audio/mpeg,audio/mp4,audio/aac,audio/ogg,audio/wav,audio/x-wav,audio/webm,.mp3,.m4a,.aac,.ogg,.wav,.webm" onChange={onAudioSelected} required /></label>
                 {audioFiles.length > 0 && <div className="admin-selected-files"><strong>{audioFiles.length} audio file{audioFiles.length === 1 ? '' : 's'} selected</strong>{audioFiles.slice(0, 8).map((file) => <small key={file.name + file.size}>{file.name} · {formatBytes(file.size)}</small>)}{audioFiles.length > 8 && <small>+ {audioFiles.length - 8} more files</small>}</div>}
-                <label>Canvas music video <span className="admin-field-hint">Optional · MP4 or WebM · maximum 15 seconds and 25 MB · attach during upload for one song only</span><input disabled={previewOnly || busy || audioFiles.length > 1} id="admin-video-file" type="file" accept="video/mp4,video/webm,.mp4,.webm" onChange={(event) => setVideoFile(event.target.files?.[0] ?? null)} /></label>
+                <label>Soundtrack banner <span className="admin-field-hint">Optional wide image · recommended 1600 × 600 · JPG, PNG, or WebP · max 2 MB. For one song only; add or replace later using Edit.</span><input disabled={previewOnly || busy || audioFiles.length > 1} type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => setTrackBannerFile(event.target.files?.[0] ?? null)} /></label>
+                {trackBannerFile && <p className="admin-file-name">Selected soundtrack banner: {trackBannerFile.name}</p>}
+                <label className="admin-check-row"><input type="checkbox" disabled={previewOnly || busy} checked={publishImmediately} onChange={(event) => setPublishImmediately(event.target.checked)} /> Publish immediately — make this album and all its tracks visible to listeners.</label>
+                <label>Canvas music video <span className="admin-field-hint">Optional. Upload audio with or without Canvas; add, replace, or remove it later using Edit on the track. Attach during upload only for one song. MP4/WebM · up to 15 seconds · max 25 MB.</span><input disabled={previewOnly || busy || audioFiles.length > 1} id="admin-video-file" type="file" accept="video/mp4,video/webm,.mp4,.webm" onChange={(event) => setVideoFile(event.target.files?.[0] ?? null)} /></label>
                 {videoFile && <p className="admin-file-name">Selected Canvas: {videoFile.name}</p>}
                 <label>Duration in seconds <span className="admin-field-hint">Detected automatically for each song; this field is used for a single file only.</span><input disabled={previewOnly || busy || audioFiles.length !== 1} type="number" min="0" max="86400" value={trackDuration} onChange={(event) => setTrackDuration(event.target.value)} /></label>
                 {uploadProgress && <p className="admin-upload-progress" role="status">{uploadProgress}</p>}
@@ -694,11 +755,16 @@ export function AdminCentre({ onExit, onNotice, previewOnly = false }: { onExit:
                 <div><strong>Edit track details</strong><button type="button" className="admin-text-button" onClick={() => setEditingTrack(null)}>Cancel</button></div>
                 <div className="admin-form-row">
                   <label>Title<input disabled={previewOnly || busy} value={editTitle} onChange={(event) => setEditTitle(event.target.value)} required maxLength={120} /></label>
+                  <label>Artist name<input disabled={previewOnly || busy} value={editTrackArtistName} onChange={(event) => setEditTrackArtistName(event.target.value)} required maxLength={120} /></label>
                   <label>Genre<input disabled={previewOnly || busy} value={editGenre} onChange={(event) => setEditGenre(event.target.value)} maxLength={60} /></label>
                   <label>Track number<input disabled={previewOnly || busy} type="number" min="1" step="1" value={editNumber} onChange={(event) => setEditNumber(event.target.value)} required /></label>
                   <label>Duration (seconds)<input disabled={previewOnly || busy} type="number" min="0" max="86400" value={editDuration} onChange={(event) => setEditDuration(event.target.value)} required /></label>
                 </div>
-                <label>Replace Canvas video <span className="admin-field-hint">Optional · MP4 or WebM · maximum 15 seconds and 25 MB</span><input disabled={previewOnly || busy} type="file" accept="video/mp4,video/webm,.mp4,.webm" onChange={(event) => setEditVideoFile(event.target.files?.[0] ?? null)} /></label>
+                <label>{editingTrack.banner_url ? 'Replace soundtrack banner' : 'Add soundtrack banner'} <span className="admin-field-hint">Optional wide image · recommended 1600 × 600 · JPG, PNG, or WebP · max 2 MB.</span><input disabled={previewOnly || busy} type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => setEditBannerFile(event.target.files?.[0] ?? null)} /></label>
+                {editingTrack.banner_url && <p className="admin-file-name">A soundtrack banner is currently attached.</p>}
+                {editBannerFile && <p className="admin-file-name">New soundtrack banner: {editBannerFile.name}</p>}
+                {editingTrack.banner_url && <label className="admin-check-row"><input type="checkbox" disabled={previewOnly || busy || Boolean(editBannerFile)} checked={removeExistingBanner} onChange={(event) => setRemoveExistingBanner(event.target.checked)} /> Remove current soundtrack banner when saving</label>}
+                <label>{editingTrack.video_path ? 'Replace Canvas video' : 'Add Canvas video'} <span className="admin-field-hint">{editingTrack.video_path ? 'Optional. Leave empty to keep the current video, select a file to replace it, or check below to remove it.' : 'Optional. Leave empty for an audio-only track, or select a file to add Canvas now.'} MP4/WebM · up to 15 seconds · max 25 MB.</span><input disabled={previewOnly || busy} type="file" accept="video/mp4,video/webm,.mp4,.webm" onChange={(event) => setEditVideoFile(event.target.files?.[0] ?? null)} /></label>
                 {editingTrack.video_path && <p className="admin-file-name">A Canvas video is currently attached to this track.</p>}
                 {editVideoFile && <p className="admin-file-name">New Canvas: {editVideoFile.name}</p>}
                 {editingTrack.video_path && <label className="admin-check-row"><input type="checkbox" disabled={previewOnly || busy || Boolean(editVideoFile)} checked={removeExistingVideo} onChange={(event) => setRemoveExistingVideo(event.target.checked)} /> Remove current Canvas video when saving</label>}
@@ -711,7 +777,7 @@ export function AdminCentre({ onExit, onNotice, previewOnly = false }: { onExit:
                   <thead><tr><th>Track</th><th>Album</th><th>Duration</th><th>Plays</th><th>Status</th><th>Actions</th></tr></thead>
                   <tbody>{visibleTracks.map((track) => (
                     <tr key={track.id}>
-                      <td><strong>{track.title}</strong><small>{track.artist_name}{track.video_path ? ' · Canvas video attached' : ''}</small></td>
+                      <td><strong>{track.title}</strong><small>{track.artist_name}{track.video_path ? ' · Canvas video attached' : ''}{track.banner_url ? ' · Banner attached' : ''}</small></td>
                       <td>{track.album_title || 'Single'}</td>
                       <td>{durationLabel(track.duration_seconds)}</td>
                       <td>{Number(track.plays_count || 0).toLocaleString()}</td>

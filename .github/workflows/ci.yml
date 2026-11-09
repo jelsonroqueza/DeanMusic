@@ -68,9 +68,12 @@ jobs:
           assert not missing, f"Missing tables after all migrations: {sorted(missing)}"
 
           album_columns = {row[1] for row in db.execute("PRAGMA table_info(albums)")}
-          required_album_columns = {"description", "is_published", "published_at", "created_by"}
+          required_album_columns = {"description", "is_published", "published_at", "created_by", "banner_url"}
           missing_columns = required_album_columns - album_columns
           assert not missing_columns, f"Missing Admin Centre album columns: {sorted(missing_columns)}"
+
+          track_columns = {row[1] for row in db.execute("PRAGMA table_info(tracks)")}
+          assert "banner_url" in track_columns, "Missing soundtrack banner column."
 
           media_columns = {row[1] for row in db.execute("PRAGMA table_info(media_assets)")}
           required_media_columns = {"id", "provider", "object_key", "media_kind", "file_name", "content_type", "size_bytes", "created_by", "status"}
@@ -78,21 +81,46 @@ jobs:
           assert not missing_media_columns, f"Missing media inventory columns: {sorted(missing_media_columns)}"
 
           api_source = Path("functions/api/[[path]].ts").read_text(encoding="utf-8")
-          media_route_path = Path("functions/media/[id].ts")
-          assert media_route_path.exists(), "Dedicated /media/:id Pages Function route is missing."
-          media_route = media_route_path.read_text(encoding="utf-8")
-          assert "parseByteRange" in media_route and "status: 206" in media_route, "Dedicated media route must support HTTP byte-range streaming."
-          assert "getWithMetadata" in media_route and "MEDIA?: KVNamespace" in media_route, "Dedicated media route must serve existing KV objects."
-          assert "env.MEDIA_R2" in media_route, "Dedicated media route must preserve optional R2 compatibility."
-          assert "Content-Range" in media_route and "Accept-Ranges" in media_route, "Media route must return byte range headers for audio seeking."
           assert "ALTER TABLE tracks ADD COLUMN video_path TEXT" in api_source, "Idempotent Canvas video_path schema recovery is missing."
           assert "R2_STORAGE_LIMIT_BYTES = 100_000_000_000" in api_source, "The DeanMusic 100 GB storage ceiling is missing."
           assert "R2_STORAGE_WARNING_BYTES = 80_000_000_000" in api_source, "The DeanMusic 80 GB storage warning is missing."
           assert "token.length >= 43" in api_source, "First-admin activation must require a 32-byte random token."
           assert "failed_attempts + 1" in api_source and "+15 minutes" in api_source, "First-admin activation lockout is missing."
           assert "parseMp4CanvasInfo" in api_source and "parseWebmCanvasInfo" in api_source, "Server-side Canvas container validation is missing."
+          assert "MAX_AUDIO_BYTES = 24 * 1024 * 1024" in api_source, "Audio uploads must be capped at 24 MiB per KV object."
+          assert "Audio files must be 24 MiB or smaller." in api_source, "Audio upload error text must match the 24 MiB limit."
+          assert "publishImmediately = body?.publishImmediately !== false" in api_source, "New soundtrack uploads must publish immediately by default."
+          assert "resolvedArtistName = artistName || album.artist_name" in api_source, "Track-specific artist attribution is missing."
+          assert "UPDATE albums SET is_published = 1" in api_source, "Publish-immediately must publish the selected album."
+          assert "newBannerUrl" in api_source and "banner_url" in api_source, "Track banner APIs are missing."
+          assert "bannerUrl" in api_source and "album.banner_url" in api_source, "Album banner APIs are missing."
+          admin_source = Path("src/AdminCentre.tsx").read_text(encoding="utf-8")
+          assert "max 24 MiB each" in admin_source, "Admin Centre audio upload hint must show the 24 MiB limit."
+          assert "add, replace, or remove it later using Edit on the track" in admin_source, "Canvas must be clearly described as optional and editable later."
+          assert "Add Canvas video" in admin_source and "Replace Canvas video" in admin_source, "Edit Track must support adding and replacing Canvas video."
+          assert "Artist name" in admin_source and "trackArtistName" in admin_source, "Individual soundtrack artist input is missing."
+          assert "Publish immediately" in admin_source, "Admin Centre publish-immediately option is missing."
+          assert "Album banner" in admin_source and "Soundtrack banner" in admin_source, "Album and soundtrack banner upload controls are missing."
+          app_source = Path("src/App.tsx").read_text(encoding="utf-8")
+          assert "albumBannerUrl" in app_source and "bannerUrl" in app_source, "Public listener views must consume track and album banners."
+          assert "now-playing-banner" in app_source, "Public wide banner display is missing."
+          assert "autoPlay" in app_source and "onCanPlay" in app_source, "Canvas video must auto-start when a track is selected."
+          assert "canvasErrorTrackId" in app_source, "Canvas playback failure must trigger the banner fallback."
+          assert "canvasErrorTrackId !== active.id" in app_source, "Canvas must take visual priority when it is available."
+          assert "!active.videoUrl || canvasErrorTrackId === active.id" in app_source, "Track/album banner must show when Canvas is absent or unavailable."
           assert "reconcileLegacyKvMedia" in api_source, "Legacy KV media inventory reconciliation is missing."
+          media_route_path = Path("functions/media/[id].ts")
+          assert media_route_path.exists(), "Dedicated /media/:id Pages Function route is missing."
+          media_route = media_route_path.read_text(encoding="utf-8")
+          assert "parseByteRange" in media_route and "status: 206" in media_route, "Media route must support byte-range streaming."
+          assert "getWithMetadata" in media_route and "MEDIA?: KVNamespace" in media_route, "Media route must serve existing KV media objects."
+          assert "env.MEDIA_R2" in media_route and "Content-Range" in media_route and "Accept-Ranges" in media_route, "Media route must retain optional R2 compatibility and range headers."
           assert "Isolated Preview demo (no D1 connection)" in api_source, "Preview must provide safe demo API responses without production bindings."
+
+          signal_one = db.execute("SELECT is_published FROM albums WHERE id='signal-one'").fetchone()
+          assert signal_one == (1,), f"Signal One album should be published by the approved migration: {signal_one}"
+          signal_one_drafts = db.execute("SELECT COUNT(*) FROM tracks WHERE album_id='signal-one' AND is_published=0").fetchone()[0]
+          assert signal_one_drafts == 0, f"Signal One should have no draft tracks after the approved migration: {signal_one_drafts}"
 
           track = db.execute("SELECT title, audio_path FROM tracks WHERE id='demo-midnight'").fetchone()
           assert track == ("Midnight Reverie", "browser-synth"), track

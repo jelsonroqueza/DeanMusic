@@ -35,7 +35,7 @@ type UserRecord = { id: string; name: string; email: string };
 const AUDIO_TYPES = new Set(['audio/mpeg', 'audio/mp4', 'audio/aac', 'audio/ogg', 'audio/wav', 'audio/x-wav', 'audio/webm']);
 const IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
 const VIDEO_TYPES = new Set(['video/mp4', 'video/webm']);
-const MAX_AUDIO_BYTES = 20 * 1024 * 1024;
+const MAX_AUDIO_BYTES = 24 * 1024 * 1024;
 const MAX_IMAGE_BYTES = 2 * 1024 * 1024;
 const MAX_VIDEO_BYTES = 25 * 1024 * 1024;
 const R2_STORAGE_LIMIT_BYTES = 100_000_000_000;
@@ -608,7 +608,7 @@ async function uploadMedia(request: Request, env: Env, admin: UserRecord): Promi
         ? 'Cover images must be 2 MB or smaller.'
         : kind === 'video'
           ? 'Music videos must be 25 MB or smaller.'
-          : 'Audio files must be 20 MB or smaller.'
+          : 'Audio files must be 24 MiB or smaller.'
     }, 413);
   }
   if (kind === 'video') {
@@ -823,7 +823,7 @@ export const onRequest = async ({ request, env }: Context): Promise<Response> =>
     if (path === '/api/catalog' && request.method === 'GET') {
       const tracks = await tracksWithCanvas(
         env,
-        'SELECT t.id, t.title, t.duration_seconds, t.genre, t.audio_path, t.video_path, t.external_audio_url, t.plays_count, ar.name AS artist_name, al.title AS album_title, al.cover_url FROM tracks t INNER JOIN artists ar ON ar.id = t.artist_id LEFT JOIN albums al ON al.id = t.album_id WHERE t.is_published = 1 ORDER BY t.plays_count DESC, t.created_at DESC LIMIT 100',
+        'SELECT t.id, t.title, t.duration_seconds, t.genre, t.audio_path, t.video_path, t.banner_url, t.external_audio_url, t.plays_count, ar.name AS artist_name, al.title AS album_title, al.cover_url, al.banner_url AS album_banner_url FROM tracks t INNER JOIN artists ar ON ar.id = t.artist_id LEFT JOIN albums al ON al.id = t.album_id WHERE t.is_published = 1 ORDER BY t.plays_count DESC, t.created_at DESC LIMIT 100',
         'SELECT t.id, t.title, t.duration_seconds, t.genre, t.audio_path, t.external_audio_url, t.plays_count, ar.name AS artist_name, al.title AS album_title, al.cover_url FROM tracks t INNER JOIN artists ar ON ar.id = t.artist_id LEFT JOIN albums al ON al.id = t.album_id WHERE t.is_published = 1 ORDER BY t.plays_count DESC, t.created_at DESC LIMIT 100'
       );
       return reply({ tracks }, 200, 'public, max-age=60, stale-while-revalidate=300');
@@ -831,7 +831,7 @@ export const onRequest = async ({ request, env }: Context): Promise<Response> =>
 
     if (path === '/api/albums' && request.method === 'GET') {
       const result = await env.DB.prepare(
-        'SELECT al.id, al.title, al.description, al.cover_url, al.release_date, al.genre, al.published_at, ar.name AS artist_name, COUNT(t.id) AS track_count FROM albums al INNER JOIN artists ar ON ar.id = al.artist_id LEFT JOIN tracks t ON t.album_id = al.id AND t.is_published = 1 WHERE al.is_published = 1 GROUP BY al.id ORDER BY COALESCE(al.published_at, al.created_at) DESC LIMIT 100'
+        'SELECT al.id, al.title, al.description, al.cover_url, al.banner_url, al.release_date, al.genre, al.published_at, ar.name AS artist_name, COUNT(t.id) AS track_count FROM albums al INNER JOIN artists ar ON ar.id = al.artist_id LEFT JOIN tracks t ON t.album_id = al.id AND t.is_published = 1 WHERE al.is_published = 1 GROUP BY al.id ORDER BY COALESCE(al.published_at, al.created_at) DESC LIMIT 100'
       ).all();
       return reply({ albums: result.results }, 200, 'public, max-age=60, stale-while-revalidate=300');
     }
@@ -839,12 +839,12 @@ export const onRequest = async ({ request, env }: Context): Promise<Response> =>
     const publicAlbumMatch = path.match(/^\/api\/albums\/([a-zA-Z0-9_-]+)$/);
     if (publicAlbumMatch && request.method === 'GET') {
       const album = await env.DB.prepare(
-        'SELECT al.id, al.title, al.description, al.cover_url, al.release_date, al.genre, ar.name AS artist_name FROM albums al INNER JOIN artists ar ON ar.id = al.artist_id WHERE al.id = ? AND al.is_published = 1'
+        'SELECT al.id, al.title, al.description, al.cover_url, al.banner_url, al.release_date, al.genre, ar.name AS artist_name FROM albums al INNER JOIN artists ar ON ar.id = al.artist_id WHERE al.id = ? AND al.is_published = 1'
       ).bind(publicAlbumMatch[1]).first();
       if (!album) return reply({ error: 'Album not found.' }, 404);
       const tracks = await tracksWithCanvas(
         env,
-        'SELECT id, title, duration_seconds, track_number, genre, audio_path, video_path, external_audio_url, plays_count FROM tracks WHERE album_id = ? AND is_published = 1 ORDER BY track_number ASC, created_at ASC',
+        'SELECT id, title, duration_seconds, track_number, genre, audio_path, video_path, banner_url, external_audio_url, plays_count FROM tracks WHERE album_id = ? AND is_published = 1 ORDER BY track_number ASC, created_at ASC',
         'SELECT id, title, duration_seconds, track_number, genre, audio_path, external_audio_url, plays_count FROM tracks WHERE album_id = ? AND is_published = 1 ORDER BY track_number ASC, created_at ASC',
         [publicAlbumMatch[1]]
       );
@@ -895,7 +895,7 @@ export const onRequest = async ({ request, env }: Context): Promise<Response> =>
       if (!playlist) return reply({ error: 'Playlist not found.' }, 404);
       const tracks = await tracksWithCanvas(
         env,
-        'SELECT t.id, t.title, t.duration_seconds, t.genre, t.audio_path, t.video_path, t.external_audio_url, t.plays_count, ar.name AS artist_name, al.title AS album_title FROM playlist_tracks pt INNER JOIN tracks t ON t.id = pt.track_id INNER JOIN artists ar ON ar.id = t.artist_id LEFT JOIN albums al ON al.id = t.album_id WHERE pt.playlist_id = ? AND t.is_published = 1 ORDER BY pt.position ASC',
+        'SELECT t.id, t.title, t.duration_seconds, t.genre, t.audio_path, t.video_path, t.banner_url, t.external_audio_url, t.plays_count, ar.name AS artist_name, al.title AS album_title, al.banner_url AS album_banner_url FROM playlist_tracks pt INNER JOIN tracks t ON t.id = pt.track_id INNER JOIN artists ar ON ar.id = t.artist_id LEFT JOIN albums al ON al.id = t.album_id WHERE pt.playlist_id = ? AND t.is_published = 1 ORDER BY pt.position ASC',
         'SELECT t.id, t.title, t.duration_seconds, t.genre, t.audio_path, t.external_audio_url, t.plays_count, ar.name AS artist_name, al.title AS album_title FROM playlist_tracks pt INNER JOIN tracks t ON t.id = pt.track_id INNER JOIN artists ar ON ar.id = t.artist_id LEFT JOIN albums al ON al.id = t.album_id WHERE pt.playlist_id = ? AND t.is_published = 1 ORDER BY pt.position ASC',
         [publicOrOwnedPlaylist[1]]
       );
@@ -1116,7 +1116,7 @@ export const onRequest = async ({ request, env }: Context): Promise<Response> =>
       const admin = await getAdmin(request, env);
       if (!admin) return reply({ error: 'Admin access required.' }, 403);
       const result = await env.DB.prepare(
-        'SELECT al.id, al.title, al.description, al.cover_url, al.release_date, al.genre, al.is_published, al.created_at, ar.name AS artist_name, COUNT(t.id) AS track_count FROM albums al INNER JOIN artists ar ON ar.id = al.artist_id LEFT JOIN tracks t ON t.album_id = al.id GROUP BY al.id ORDER BY al.created_at DESC LIMIT 300'
+        'SELECT al.id, al.title, al.description, al.cover_url, al.banner_url, al.release_date, al.genre, al.is_published, al.created_at, ar.name AS artist_name, COUNT(t.id) AS track_count FROM albums al INNER JOIN artists ar ON ar.id = al.artist_id LEFT JOIN tracks t ON t.album_id = al.id GROUP BY al.id ORDER BY al.created_at DESC LIMIT 300'
       ).all();
       return reply({ albums: result.results });
     }
@@ -1124,15 +1124,18 @@ export const onRequest = async ({ request, env }: Context): Promise<Response> =>
     if (path === '/api/admin/albums' && request.method === 'POST') {
       const admin = await getAdmin(request, env);
       if (!admin) return reply({ error: 'Admin access required.' }, 403);
-      const body = await bodyJson<{ title?: unknown; artistName?: unknown; genre?: unknown; description?: unknown; releaseDate?: unknown; coverUrl?: unknown }>(request);
+      const body = await bodyJson<{ title?: unknown; artistName?: unknown; genre?: unknown; description?: unknown; releaseDate?: unknown; coverUrl?: unknown; bannerUrl?: unknown }>(request);
       const title = safeText(body?.title, 120);
       const artistName = safeText(body?.artistName, 120) || admin.name;
       const genre = safeText(body?.genre, 60);
       const description = safeText(body?.description, 1000);
       const coverUrl = safeText(body?.coverUrl, 300);
+      const bannerUrl = safeText(body?.bannerUrl, 300);
       const releaseDate = safeText(body?.releaseDate, 20);
       if (!title) return reply({ error: 'Album title is required.' }, 400);
       if (coverUrl && !/^\/media\/[a-f0-9-]{36}$/i.test(coverUrl)) return reply({ error: 'Invalid album cover URL.' }, 400);
+      if (bannerUrl && !/^\/media\/[a-f0-9-]{36}$/i.test(bannerUrl)) return reply({ error: 'Invalid album banner URL.' }, 400);
+      if (bannerUrl && !(await hasMediaObject(env, bannerUrl.slice('/media/'.length)))) return reply({ error: 'Uploaded album banner not found in media storage.' }, 400);
       let artist = await env.DB.prepare('SELECT id FROM artists WHERE name = ? COLLATE NOCASE LIMIT 1')
         .bind(artistName).first<{ id: string }>();
       if (!artist) {
@@ -1143,9 +1146,9 @@ export const onRequest = async ({ request, env }: Context): Promise<Response> =>
       }
       const id = crypto.randomUUID();
       await env.DB.prepare(
-        'INSERT INTO albums (id, artist_id, title, cover_url, release_date, genre, description, is_published, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)'
-      ).bind(id, artist.id, title, coverUrl || null, releaseDate || null, genre || null, description || null, admin.id).run();
-      return reply({ album: { id, title, artist_name: artistName, genre, description, cover_url: coverUrl || null, is_published: 0 } }, 201);
+        'INSERT INTO albums (id, artist_id, title, cover_url, banner_url, release_date, genre, description, is_published, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)'
+      ).bind(id, artist.id, title, coverUrl || null, bannerUrl || null, releaseDate || null, genre || null, description || null, admin.id).run();
+      return reply({ album: { id, title, artist_name: artistName, genre, description, cover_url: coverUrl || null, banner_url: bannerUrl || null, is_published: 0 } }, 201);
     }
 
     const albumPublish = path.match(/^\/api\/admin\/albums\/([a-zA-Z0-9_-]+)\/(publish|unpublish)$/);
@@ -1166,21 +1169,32 @@ export const onRequest = async ({ request, env }: Context): Promise<Response> =>
     if (adminAlbumId && request.method === 'PATCH') {
       const admin = await getAdmin(request, env);
       if (!admin) return reply({ error: 'Admin access required.' }, 403);
-      const body = await bodyJson<{ title?: unknown; artistName?: unknown; genre?: unknown; description?: unknown; coverUrl?: unknown; releaseDate?: unknown }>(request);
+      const body = await bodyJson<{ title?: unknown; artistName?: unknown; genre?: unknown; description?: unknown; coverUrl?: unknown; bannerUrl?: unknown; releaseDate?: unknown }>(request);
       const title = safeText(body?.title, 120);
       const artistName = safeText(body?.artistName, 120);
       const genre = safeText(body?.genre, 60);
       const description = safeText(body?.description, 1000);
       const coverUrl = safeText(body?.coverUrl, 300);
+      const bannerUrl = body && Object.prototype.hasOwnProperty.call(body, 'bannerUrl')
+        ? (body.bannerUrl === null ? null : safeText(body.bannerUrl, 300))
+        : undefined;
       const releaseDate = safeText(body?.releaseDate, 20);
       if (!title) return reply({ error: 'Album title is required.' }, 400);
       if (coverUrl && !/^\/media\/[a-f0-9-]{36}$/i.test(coverUrl)) return reply({ error: 'Invalid album cover URL.' }, 400);
-      const album = await env.DB.prepare('SELECT artist_id FROM albums WHERE id = ?').bind(adminAlbumId).first<{ artist_id: string }>();
+      if (bannerUrl !== undefined && bannerUrl !== null && bannerUrl && !/^\/media\/[a-f0-9-]{36}$/i.test(bannerUrl)) return reply({ error: 'Invalid album banner URL.' }, 400);
+      if (bannerUrl) {
+        if (!(await hasMediaObject(env, bannerUrl.slice('/media/'.length)))) return reply({ error: 'Uploaded album banner not found in media storage.' }, 400);
+      }
+      const album = await env.DB.prepare('SELECT artist_id, banner_url FROM albums WHERE id = ?').bind(adminAlbumId).first<{ artist_id: string; banner_url: string | null }>();
       if (!album) return reply({ error: 'Album not found.' }, 404);
       if (artistName) await env.DB.prepare('UPDATE artists SET name = ? WHERE id = ?').bind(artistName, album.artist_id).run();
       await env.DB.prepare(
         'UPDATE albums SET title = ?, genre = ?, description = ?, cover_url = ?, release_date = ? WHERE id = ?'
       ).bind(title, genre || null, description || null, coverUrl || null, releaseDate || null, adminAlbumId).run();
+      if (bannerUrl !== undefined && bannerUrl !== album.banner_url) {
+        await env.DB.prepare('UPDATE albums SET banner_url = ? WHERE id = ?').bind(bannerUrl || null, adminAlbumId).run();
+        if (album.banner_url) await deleteMediaPath(env, album.banner_url);
+      }
       return reply({ updated: true });
     }
 
@@ -1189,7 +1203,7 @@ export const onRequest = async ({ request, env }: Context): Promise<Response> =>
       if (!admin) return reply({ error: 'Admin access required.' }, 403);
       await ensureMediaSchema(env);
       const result = await env.DB.prepare(
-        'SELECT t.id, t.album_id, t.title, t.duration_seconds, t.track_number, t.genre, t.audio_path, t.video_path, t.is_published, t.plays_count, ar.name AS artist_name, al.title AS album_title FROM tracks t INNER JOIN artists ar ON ar.id = t.artist_id LEFT JOIN albums al ON al.id = t.album_id ORDER BY t.created_at DESC LIMIT 500'
+        'SELECT t.id, t.album_id, t.title, t.duration_seconds, t.track_number, t.genre, t.audio_path, t.video_path, t.banner_url, t.is_published, t.plays_count, ar.name AS artist_name, al.title AS album_title FROM tracks t INNER JOIN artists ar ON ar.id = t.artist_id LEFT JOIN albums al ON al.id = t.album_id ORDER BY t.created_at DESC LIMIT 500'
       ).all();
       return reply({ tracks: result.results });
     }
@@ -1197,11 +1211,14 @@ export const onRequest = async ({ request, env }: Context): Promise<Response> =>
     if (path === '/api/admin/tracks' && request.method === 'POST') {
       const admin = await getAdmin(request, env);
       if (!admin) return reply({ error: 'Admin access required.' }, 403);
-      const body = await bodyJson<{ albumId?: unknown; title?: unknown; genre?: unknown; duration?: unknown; trackNumber?: unknown; audioPath?: unknown }>(request);
+      const body = await bodyJson<{ albumId?: unknown; title?: unknown; artistName?: unknown; genre?: unknown; duration?: unknown; trackNumber?: unknown; audioPath?: unknown; bannerUrl?: unknown; publishImmediately?: unknown }>(request);
       const albumId = safeText(body?.albumId, 100);
       const title = safeText(body?.title, 120);
+      const artistName = safeText(body?.artistName, 120);
       const genre = safeText(body?.genre, 60);
       const audioPath = safeText(body?.audioPath, 300);
+      const bannerUrl = safeText(body?.bannerUrl, 300);
+      const publishImmediately = body?.publishImmediately !== false;
       const duration = Number(body?.duration);
       const trackNumber = Number(body?.trackNumber);
       if (!albumId || !title || !Number.isFinite(duration) || duration < 0 || duration > 86400 || !Number.isInteger(trackNumber) || trackNumber < 1) {
@@ -1210,18 +1227,40 @@ export const onRequest = async ({ request, env }: Context): Promise<Response> =>
       if (!/^\/media\/[a-f0-9-]{36}$/i.test(audioPath) && audioPath !== 'browser-synth') {
         return reply({ error: 'A DeanMusic media upload is required.' }, 400);
       }
-      const album = await env.DB.prepare('SELECT artist_id, genre, is_published FROM albums WHERE id = ?')
-        .bind(albumId).first<{ artist_id: string; genre: string | null; is_published: number }>();
+      const album = await env.DB.prepare('SELECT al.artist_id, al.genre, al.is_published, ar.name AS artist_name FROM albums al INNER JOIN artists ar ON ar.id = al.artist_id WHERE al.id = ?')
+        .bind(albumId).first<{ artist_id: string; genre: string | null; is_published: number; artist_name: string }>();
       if (!album) return reply({ error: 'Album not found.' }, 404);
+      if (bannerUrl && !/^\/media\/[a-f0-9-]{36}$/i.test(bannerUrl)) return reply({ error: 'Invalid soundtrack banner URL.' }, 400);
+      if (bannerUrl && !(await hasMediaObject(env, bannerUrl.slice('/media/'.length)))) return reply({ error: 'Uploaded soundtrack banner not found in media storage.' }, 400);
       if (audioPath.startsWith('/media/')) {
         const mediaId = audioPath.slice('/media/'.length);
         if (!(await hasMediaObject(env, mediaId))) return reply({ error: 'Uploaded audio file not found in media storage.' }, 400);
       }
+      let artistId = album.artist_id;
+      const resolvedArtistName = artistName || album.artist_name;
+      if (resolvedArtistName.trim().toLowerCase() !== album.artist_name.trim().toLowerCase()) {
+        let artist = await env.DB.prepare('SELECT id FROM artists WHERE name = ? COLLATE NOCASE LIMIT 1')
+          .bind(resolvedArtistName).first<{ id: string }>();
+        if (!artist) {
+          const artistIdCreated = crypto.randomUUID();
+          await env.DB.prepare('INSERT INTO artists (id, name, bio) VALUES (?, ?, ?)')
+            .bind(artistIdCreated, resolvedArtistName, 'Published through DeanMusic.').run();
+          artist = { id: artistIdCreated };
+        }
+        artistId = artist.id;
+      }
+      if (publishImmediately) {
+        await env.DB.prepare("UPDATE albums SET is_published = 1, published_at = COALESCE(published_at, datetime('now')) WHERE id = ?")
+          .bind(albumId).run();
+        await env.DB.prepare('UPDATE tracks SET is_published = 1 WHERE album_id = ?')
+          .bind(albumId).run();
+      }
       const id = crypto.randomUUID();
+      const published = publishImmediately ? 1 : 0;
       await env.DB.prepare(
-        'INSERT INTO tracks (id, album_id, artist_id, title, duration_seconds, track_number, genre, audio_path, is_published) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
-      ).bind(id, albumId, album.artist_id, title, Math.floor(duration), trackNumber, genre || album.genre, audioPath, album.is_published ? 1 : 0).run();
-      return reply({ track: { id, album_id: albumId, title, duration_seconds: Math.floor(duration), track_number: trackNumber, genre, audio_path: audioPath, is_published: album.is_published ? 1 : 0 } }, 201);
+        'INSERT INTO tracks (id, album_id, artist_id, title, duration_seconds, track_number, genre, audio_path, banner_url, is_published) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+      ).bind(id, albumId, artistId, title, Math.floor(duration), trackNumber, genre || album.genre, audioPath, bannerUrl || null, published).run();
+      return reply({ track: { id, album_id: albumId, title, artist_name: resolvedArtistName, duration_seconds: Math.floor(duration), track_number: trackNumber, genre, audio_path: audioPath, banner_url: bannerUrl || null, is_published: published } }, 201);
     }
 
     const adminTrack = path.match(/^\/api\/admin\/tracks\/([a-zA-Z0-9_-]+)$/);
@@ -1229,7 +1268,7 @@ export const onRequest = async ({ request, env }: Context): Promise<Response> =>
       const admin = await getAdmin(request, env);
       if (!admin) return reply({ error: 'Admin access required.' }, 403);
       await ensureMediaSchema(env);
-      const body = await bodyJson<{ title?: unknown; genre?: unknown; duration?: unknown; trackNumber?: unknown; videoPath?: unknown }>(request);
+      const body = await bodyJson<{ title?: unknown; artistName?: unknown; genre?: unknown; duration?: unknown; trackNumber?: unknown; videoPath?: unknown; bannerUrl?: unknown }>(request);
       const title = safeText(body?.title, 120);
       const genre = safeText(body?.genre, 60);
       const duration = Number(body?.duration);
@@ -1237,8 +1276,8 @@ export const onRequest = async ({ request, env }: Context): Promise<Response> =>
       if (!title || !Number.isFinite(duration) || duration < 0 || duration > 86400 || !Number.isInteger(trackNumber) || trackNumber < 1) {
         return reply({ error: 'Check the track title, duration, and track number.' }, 400);
       }
-      const existing = await env.DB.prepare('SELECT video_path FROM tracks WHERE id = ?')
-        .bind(adminTrack[1]).first<{ video_path: string | null }>();
+      const existing = await env.DB.prepare('SELECT video_path, banner_url FROM tracks WHERE id = ?')
+        .bind(adminTrack[1]).first<{ video_path: string | null; banner_url: string | null }>();
       if (!existing) return reply({ error: 'Track not found.' }, 404);
 
       let newVideoPath: string | null | undefined;
@@ -1254,13 +1293,41 @@ export const onRequest = async ({ request, env }: Context): Promise<Response> =>
         }
       }
 
+      let artistId: string | undefined;
+      const requestedArtistName = safeText(body?.artistName, 120);
+      if (requestedArtistName) {
+        let artist = await env.DB.prepare('SELECT id FROM artists WHERE name = ? COLLATE NOCASE LIMIT 1')
+          .bind(requestedArtistName).first<{ id: string }>();
+        if (!artist) {
+          const createdArtistId = crypto.randomUUID();
+          await env.DB.prepare('INSERT INTO artists (id, name, bio) VALUES (?, ?, ?)')
+            .bind(createdArtistId, requestedArtistName, 'Published through DeanMusic.').run();
+          artist = { id: createdArtistId };
+        }
+        artistId = artist.id;
+      }
+
+      let newBannerUrl: string | null | undefined;
+      if (body && Object.prototype.hasOwnProperty.call(body, 'bannerUrl')) {
+        if (body.bannerUrl === null || body.bannerUrl === '') newBannerUrl = null;
+        else if (typeof body.bannerUrl === 'string' && /^\/media\/[a-f0-9-]{36}$/i.test(body.bannerUrl)) {
+          const bannerId = body.bannerUrl.slice('/media/'.length);
+          if (!(await hasMediaObject(env, bannerId))) return reply({ error: 'Uploaded soundtrack banner not found in media storage.' }, 400);
+          newBannerUrl = body.bannerUrl;
+        } else return reply({ error: 'Invalid soundtrack banner URL.' }, 400);
+      }
+
       await env.DB.prepare(
-        'UPDATE tracks SET title = ?, genre = ?, duration_seconds = ?, track_number = ?, updated_at = datetime(\'now\') WHERE id = ?'
-      ).bind(title, genre || null, Math.floor(duration), trackNumber, adminTrack[1]).run();
+        'UPDATE tracks SET title = ?, artist_id = COALESCE(?, artist_id), genre = ?, duration_seconds = ?, track_number = ?, updated_at = datetime(\'now\') WHERE id = ?'
+      ).bind(title, artistId ?? null, genre || null, Math.floor(duration), trackNumber, adminTrack[1]).run();
 
       if (newVideoPath !== undefined && newVideoPath !== existing.video_path) {
         await env.DB.prepare('UPDATE tracks SET video_path = ? WHERE id = ?').bind(newVideoPath, adminTrack[1]).run();
         if (existing.video_path) await deleteMediaPath(env, existing.video_path);
+      }
+      if (newBannerUrl !== undefined && newBannerUrl !== existing.banner_url) {
+        await env.DB.prepare('UPDATE tracks SET banner_url = ? WHERE id = ?').bind(newBannerUrl, adminTrack[1]).run();
+        if (existing.banner_url) await deleteMediaPath(env, existing.banner_url);
       }
       return reply({ updated: true });
     }
@@ -1269,11 +1336,12 @@ export const onRequest = async ({ request, env }: Context): Promise<Response> =>
       const admin = await getAdmin(request, env);
       if (!admin) return reply({ error: 'Admin access required.' }, 403);
       await ensureMediaSchema(env);
-      const track = await env.DB.prepare('SELECT audio_path, video_path FROM tracks WHERE id = ?')
-        .bind(adminTrack[1]).first<{ audio_path: string | null; video_path: string | null }>();
+      const track = await env.DB.prepare('SELECT audio_path, video_path, banner_url FROM tracks WHERE id = ?')
+        .bind(adminTrack[1]).first<{ audio_path: string | null; video_path: string | null; banner_url: string | null }>();
       if (!track) return reply({ error: 'Track not found.' }, 404);
       if (track.audio_path) await deleteMediaPath(env, track.audio_path);
       if (track.video_path) await deleteMediaPath(env, track.video_path);
+      if (track.banner_url) await deleteMediaPath(env, track.banner_url);
       await env.DB.prepare('DELETE FROM tracks WHERE id = ?').bind(adminTrack[1]).run();
       return reply({ deleted: true });
     }
