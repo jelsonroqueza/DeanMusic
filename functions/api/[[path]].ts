@@ -326,9 +326,9 @@ function parseWebmCanvasInfo(buffer: ArrayBuffer): { duration: number; width: nu
   }
 }
 
-function validateCanvasVideoOnServer(upload: File): string | null {
-  const bufferPromise = upload.arrayBuffer();
-  return bufferPromise.then((buffer) => {
+async function validateCanvasVideoOnServer(upload: File): Promise<string | null> {
+  try {
+    const buffer = await upload.arrayBuffer();
     const metadata = upload.type === 'video/mp4'
       ? parseMp4CanvasInfo(buffer)
       : parseWebmCanvasInfo(buffer);
@@ -337,7 +337,9 @@ function validateCanvasVideoOnServer(upload: File): string | null {
     if (metadata.width < 720 || metadata.height < 1280) return 'Use an HD vertical video with at least 720 × 1280 resolution.';
     if (Math.abs((metadata.width / metadata.height) - (9 / 16)) > 0.04) return 'Canvas videos must use a vertical 9:16 aspect ratio.';
     return null;
-  }).catch(() => 'The server could not read this video file. Please re-export it as MP4 or WebM.');
+  } catch {
+    return 'The server could not read this video file. Please re-export it as MP4 or WebM.';
+  }
 }
 
 async function reconcileLegacyKvMedia(
