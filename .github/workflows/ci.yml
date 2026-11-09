@@ -85,6 +85,7 @@ jobs:
           assert "failed_attempts + 1" in api_source and "+15 minutes" in api_source, "First-admin activation lockout is missing."
           assert "parseMp4CanvasInfo" in api_source and "parseWebmCanvasInfo" in api_source, "Server-side Canvas container validation is missing."
           assert "reconcileLegacyKvMedia" in api_source, "Legacy KV media inventory reconciliation is missing."
+          assert "Isolated Preview demo (no D1 connection)" in api_source, "Preview must provide safe demo API responses without production bindings."
 
           track = db.execute("SELECT title, audio_path FROM tracks WHERE id='demo-midnight'").fetchone()
           assert track == ("Midnight Reverie", "browser-synth"), track
