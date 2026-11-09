@@ -473,7 +473,7 @@ export function AdminCentre({ onExit, onNotice, previewOnly = false }: { onExit:
         method: 'PATCH',
         body: JSON.stringify({
           title: editAlbumTitle.trim(),
-          artistName: editTrackArtistName.trim(),
+          artistName: editArtistName.trim(),
           genre: editAlbumGenre.trim(),
           description: editAlbumDescription.trim(),
           releaseDate: editReleaseDate,
@@ -695,7 +695,7 @@ export function AdminCentre({ onExit, onNotice, previewOnly = false }: { onExit:
                 <div><strong>Edit album details</strong><button type="button" className="admin-text-button" onClick={() => setEditingAlbum(null)}>Cancel</button></div>
                 <div className="admin-form-row">
                   <label>Album title<input disabled={previewOnly || busy} value={editAlbumTitle} onChange={(event) => setEditAlbumTitle(event.target.value)} maxLength={120} required /></label>
-                  <label>Artist name<input disabled={previewOnly || busy} value={editTrackArtistName} onChange={(event) => setEditTrackArtistName(event.target.value)} maxLength={120} required /></label>
+                  <label>Artist name<input disabled={previewOnly || busy} value={editArtistName} onChange={(event) => setEditArtistName(event.target.value)} maxLength={120} required /></label>
                   <label>Genre<input disabled={previewOnly || busy} value={editAlbumGenre} onChange={(event) => setEditAlbumGenre(event.target.value)} maxLength={60} /></label>
                   <label>Release date<input disabled={previewOnly || busy} type="date" value={editReleaseDate} onChange={(event) => setEditReleaseDate(event.target.value)} /></label>
                 </div>
