@@ -451,7 +451,7 @@ export function AdminCentre({ onExit, onNotice, previewOnly = false }: { onExit:
   const beginEditAlbum = (album: Album) => {
     setEditingAlbum(album);
     setEditAlbumTitle(album.title);
-    setEditTrackArtistName(album.artist_name);
+    setEditArtistName(album.artist_name);
     setEditAlbumGenre(album.genre ?? '');
     setEditAlbumDescription(album.description ?? '');
     setEditReleaseDate(album.release_date ?? '');
